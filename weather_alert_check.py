@@ -235,7 +235,7 @@ def main():
     def log(msg):
         print(msg, file=sys.stderr)
 
-    if not telegram_token or not groq_api_key:
+    if not telegram_token or not groq_api_key or not owm_api_key:
         log("Missing required API keys. Exiting.")
         sys.exit(1)
 
