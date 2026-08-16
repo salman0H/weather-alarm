@@ -280,30 +280,122 @@ def process_subscriber(subscriber, current_alerts, telegram_token, groq_api_key,
         log(f"[{chat_id}] Resend #{active['resend_count']} for: {active['event']}")
 
 
+def send_daily_brief(telegram_token, chat_id, metrics):
+    """
+    Sends a daily 'Clear Skies' operational brief to the authorized Telegram user.
+
+    Dispatched at most once every 24 hours when no alerts are active and the
+    predictive risk thresholds are not breached. Ensures the subscriber always
+    knows the pipeline is running, even during calm weather periods.
+
+    Args:
+        telegram_token (str): Telegram Bot API token.
+        chat_id (str): Telegram chat ID of the authorized user.
+        metrics (dict): Global aggregated metrics from collect_alerts_across_zones.
+    """
+    message = (
+        "✅ <b>System Operational — Clear Skies</b>\n\n"
+        "No official or predictive severe weather alerts are currently active in Mashhad.\n\n"
+        f"🌡 Avg Temp: {metrics.get('current_temp_avg', 0):.1f}°C\n"
+        f"💧 Avg Humidity: {metrics.get('current_hum_avg', 0):.1f}%\n"
+        f"💨 Max Wind: {metrics.get('max_wind', 0):.1f} m/s\n"
+        f"🌧 Max Precipitation Probability: {int(metrics.get('max_pop', 0) * 100)}%\n\n"
+        "<i>Urban Weather Intelligence Bot — Mashhad</i>"
+    )
+    telegram_client.send_message(telegram_token, chat_id, message)
+
+
 def main():
+    """
+    Pipeline entry point.
+
+    Execution sequence:
+        1. Load environment credentials.
+        2. In TEST_MODE: relax API-key guards and force-register the authorized
+           user as a subscriber so the full pipeline (fetch -> risk engine ->
+           Groq -> Telegram -> HTML) executes end-to-end without live API keys.
+        3. Collect live alerts + global metrics across all Mashhad zones.
+        4. For each authorized subscriber, evaluate and dispatch alerts.
+        5. Dispatch a Clear Skies operational brief if conditions are calm and
+           at least 24 hours have elapsed since the last brief.
+        6. Persist state.json and overwrite the HTML dashboard.
+    """
     telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     owm_api_key = os.environ.get("OWM_API_KEY", "")
     groq_api_key = os.environ.get("GROQ_API_KEY")
+    authorized_user_id = os.environ.get("AUTHORIZED_USER_ID")
+    test_mode = os.environ.get("TEST_MODE", "false").lower() == "true"
 
     def log(msg):
         print(msg, file=sys.stderr)
 
-    if not telegram_token or not groq_api_key or not owm_api_key:
-        log("Missing required API keys. Exiting.")
+    if test_mode:
+        log("[Pipeline] TEST_MODE=true — loading local fixture; relaxing API key guards.")
+        owm_api_key = owm_api_key or "TEST_MODE_PLACEHOLDER"
+        groq_api_key = groq_api_key or "TEST_MODE_PLACEHOLDER"
+    else:
+        if not telegram_token or not groq_api_key or not owm_api_key:
+            log("[Pipeline] ERROR — Missing required credentials: "
+                "TELEGRAM_BOT_TOKEN / OWM_API_KEY / GROQ_API_KEY. Exiting.")
+            sys.exit(1)
+
+    if not authorized_user_id:
+        log("[Pipeline] ERROR — AUTHORIZED_USER_ID is not set. Exiting for security.")
         sys.exit(1)
 
-    current_alerts = collect_alerts_across_zones(owm_api_key)
-    log(f"Unique active alerts count: {len(current_alerts)}")
+    if not telegram_token:
+        log("[Pipeline] ERROR — TELEGRAM_BOT_TOKEN is not set. Exiting.")
+        sys.exit(1)
+
+    # collect_alerts_across_zones returns (merged_alerts_dict, global_metrics_dict)
+    current_alerts, global_metrics = collect_alerts_across_zones(owm_api_key)
+    log(
+        f"[Pipeline] Active alerts: {len(current_alerts)} | "
+        f"MaxWind={global_metrics['max_wind']:.1f}m/s "
+        f"MaxPoP={global_metrics['max_pop'] * 100:.0f}% "
+        f"AvgTemp={global_metrics['current_temp_avg']:.1f}°C"
+    )
 
     current_state = state_module.load_state()
+    last_daily_brief = current_state.get("last_daily_brief")
 
-    for chat_id, subscriber in current_state["subscribers"].items():
-        process_subscriber(subscriber, current_alerts, telegram_token, groq_api_key, chat_id, log)
+    if test_mode:
+        # Force-register the authorized user so the dispatch path executes
+        # even on a clean state.json with no existing subscribers.
+        test_subscriber = state_module.get_subscriber(current_state, authorized_user_id)
+        process_subscriber(
+            test_subscriber, current_alerts, telegram_token, groq_api_key, authorized_user_id, log
+        )
+    else:
+        for chat_id, subscriber in current_state["subscribers"].items():
+            if str(chat_id) != str(authorized_user_id):
+                log(f"[Auth] Unauthorized chat_id skipped: {chat_id}")
+                continue
+            process_subscriber(
+                subscriber, current_alerts, telegram_token, groq_api_key, chat_id, log
+            )
+
+    # Clear Skies brief: once per 24 h when conditions are calm
+    if (
+        not current_alerts
+        and global_metrics["max_wind"] <= 15
+        and global_metrics["max_pop"] <= 0.70
+    ):
+        should_send = not last_daily_brief
+        if last_daily_brief:
+            last_brief_dt = datetime.fromisoformat(last_daily_brief)
+            if (datetime.now(timezone.utc) - last_brief_dt).total_seconds() > 24 * 3600:
+                should_send = True
+
+        if should_send:
+            log(f"[Brief] Dispatching Clear Skies brief to {authorized_user_id}")
+            send_daily_brief(telegram_token, authorized_user_id, global_metrics)
+            current_state["last_daily_brief"] = now_iso()
 
     state_module.save_state(current_state)
 
-    report_path = visualize_alert.render_report(load_zones(), current_alerts)
-    log(f"Visual report generated at {report_path}")
+    report_path = visualize_alert.render_report(load_zones(), current_alerts, global_metrics)
+    log(f"[Pipeline] HTML dashboard updated at {report_path}")
 
 
 if __name__ == "__main__":
