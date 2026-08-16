@@ -13,20 +13,16 @@ import urllib.request
 OWM_BASE_URL = "https://api.openweathermap.org/data/3.0/onecall"
 
 
-def fetch_alerts_for_zone(lat, lon, api_key, timeout=10):
+def fetch_weather_data_for_zone(lat, lon, api_key, timeout=10):
     """
-    Fetches the alerts array from OpenWeatherMap for a specific coordinate.
-    If no alerts are active, the 'alerts' key will not exist in the response ->
-    in that case, an empty list is returned.
-
-    We use exclude=current,minutely,hourly,daily to reduce payload size and
-    focus only on alerts.
+    Fetches the full payload (excluding current and minutely) to access 
+    both alerts and hourly probability of precipitation (pop).
     """
     params = {
         "lat": lat,
         "lon": lon,
         "appid": api_key,
-        "exclude": "current,minutely,hourly,daily",
+        "exclude": "current,minutely",
         "lang": "fa"
     }
     url = f"{OWM_BASE_URL}?{urllib.parse.urlencode(params)}"
@@ -35,20 +31,12 @@ def fetch_alerts_for_zone(lat, lon, api_key, timeout=10):
     with urllib.request.urlopen(request, timeout=timeout) as response:
         payload = json.loads(response.read().decode("utf-8"))
 
-    return payload.get("alerts", [])
-
-
-def fetch_alerts_mocked(fixture_path):
-    """
-    Test mode: Returns the content of the fixture file instead of calling the actual API.
-    The fixture structure matches the real OpenWeatherMap response, so the rest
-    of the pipeline (dedupe, message generation, dispatch) works identically
-    with mocked data.
-    """
-    with open(fixture_path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-    return payload.get("alerts", [])
+    return payload
 
 
 def is_mock_mode():
-    return os.environ.get("MOCK_ALERT", "false").lower() == "true"
+    """
+    Strictly enforced real data for production. Mock mode is disabled.
+    """
+    return False
+

@@ -51,17 +51,25 @@ def alert_id_for(alert):
 def collect_alerts_across_zones(owm_api_key):
     """
     Loops over all zones and merges alerts based on alert_id.
-    Returns: dict mapping alert_id -> {event, description, start, end, sender_name, zones: [...]}
+    Also extracts probability metrics (like max pop in the next 24 hours).
+    Returns: dict mapping alert_id -> {event, description, start, end, zones: [...], max_pop: float}
     """
     merged = {}
-    mock = weather_client.is_mock_mode()
 
     for zone in load_zones():
-        if mock:
-            raw_alerts = weather_client.fetch_alerts_mocked(MOCK_FIXTURE_PATH)
-        else:
-            raw_alerts = weather_client.fetch_alerts_for_zone(zone["lat"], zone["lon"], owm_api_key)
-
+        # Live data enforced, mock mode removed
+        payload = weather_client.fetch_weather_data_for_zone(zone["lat"], zone["lon"], owm_api_key)
+        
+        raw_alerts = payload.get("alerts", [])
+        hourly_data = payload.get("hourly", [])
+        
+        # Calculate maximum probability of precipitation (pop) in the next 24 hours
+        # OWM pop is between 0 and 1
+        max_pop = 0.0
+        if hourly_data:
+            next_24_hours = hourly_data[:24]
+            max_pop = max((hour.get("pop", 0) for hour in next_24_hours), default=0.0)
+            
         for alert in raw_alerts:
             aid = alert_id_for(alert)
             if aid not in merged:
@@ -71,14 +79,14 @@ def collect_alerts_across_zones(owm_api_key):
                     "description": alert.get("description"),
                     "start": alert.get("start"),
                     "end": alert.get("end"),
-                    "zones": []
+                    "zones": [],
+                    "max_pop": max_pop
                 }
             if zone["zone"] not in merged[aid]["zones"]:
                 merged[aid]["zones"].append(zone["zone"])
-
-        # In mock mode, we only need to process one zone's fixture to get the alerts
-        if mock:
-            break
+            # Update max_pop if this zone has a higher probability
+            if max_pop > merged[aid]["max_pop"]:
+                merged[aid]["max_pop"] = max_pop
 
     return merged
 
@@ -135,7 +143,15 @@ def dispatch_sms(phone_number, message):
 def send_alert(telegram_token, groq_api_key, chat_id, alert, phone_number=None):
     level = severity.classify_severity(alert["event"])
     level_info = severity.SEVERITY_LEVELS[level]
-    summary = groq_client.summarize_description(groq_api_key, alert["description"])
+    
+    # Calculate probability percentage
+    prob_percentage = int(alert.get("max_pop", 0) * 100)
+    
+    summary = groq_client.summarize_description(
+        api_key=groq_api_key,
+        description=alert["description"],
+        probability=prob_percentage
+    )
 
     message = build_alert_message(
         level_info, level, alert["event"], summary,

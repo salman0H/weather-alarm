@@ -19,21 +19,26 @@ SYSTEM_PROMPT = (
     "Do not add any safety recommendations—only explain what is happening. "
     "Format the output using simple HTML tags (like <b> or <i>) if emphasis is needed, "
     "but strictly avoid using any Markdown formatting (no asterisks, no hash headers). "
+    "You MUST explicitly include the following exact statistical probability at the end of your message: "
+    "\"Probability of occurrence: {probability}%\" (translate this phrase to Persian naturally). "
     "Be deterministic and precise."
 )
 
 
-def summarize_description(api_key, description, timeout=15):
+def summarize_description(api_key, description, probability=0, timeout=15):
     """
-    Summarizes the official alert description into simple language.
+    Summarizes the official alert description into simple language, and injects 
+    the precise live probability metric extracted from the API.
     Safety tips and the final message structure are built deterministically 
     in weather_alert_check.py (not via LLM) to prevent hallucinated advice.
     """
+    formatted_prompt = SYSTEM_PROMPT.format(probability=probability)
+    
     body = {
         "model": MODEL,
         "temperature": 0.0,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": formatted_prompt},
             {"role": "user", "content": description}
         ]
     }
