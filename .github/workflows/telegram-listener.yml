@@ -27,10 +27,10 @@ jobs:
           AUTHORIZED_USER_ID: ${{ secrets.AUTHORIZED_USER_ID }}
         run: python telegram_listener.py
 
-      - name: Commit updated state
+      - name: Commit updated HTML
         run: |
           git config user.name "weather-alert-bot"
           git config user.email "actions@github.com"
-          git add state.json
+          git add alert_report.html || true
           git diff --cached --quiet || git commit -m "chore: update listener offset/ack state [skip ci]"
-          git push
+          git push || true

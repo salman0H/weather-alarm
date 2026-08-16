@@ -41,10 +41,10 @@ jobs:
           MOCK_ALERT: ${{ github.event.inputs.mock_alert || 'false' }}
         run: python weather_alert_check.py
 
-      - name: Commit updated state
+      - name: Commit HTML dashboard
         run: |
           git config user.name "weather-alert-bot"
           git config user.email "actions@github.com"
-          git add state.json
-          git diff --cached --quiet || git commit -m "chore: update alert state [skip ci]"
-          git push
+          git add alert_report.html || true
+          git diff --cached --quiet || git commit -m "chore: update alert dashboard [skip ci]"
+          git push || true
