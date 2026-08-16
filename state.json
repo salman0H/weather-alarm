@@ -1,5 +1,33 @@
 {
   "offset": 0,
-  "subscribers": {},
+  "subscribers": {
+    "606424929": {
+      "phone_number": null,
+      "active_alert": {
+        "alert_id": "40971f892bc8f26dd7cf262c8d0436d7",
+        "event": "Flash Flood Warning",
+        "description": "Heavy rainfall expected in northern and eastern Mashhad. High probability of flash flooding in low-lying areas. Avoid river channels and flood-prone zones.",
+        "start": 1755248400,
+        "end": 1755262800,
+        "zones": [
+          "مرکز شهر",
+          "وکیل‌آباد",
+          "طرق",
+          "قاسم‌آباد",
+          "الهیه / طلاب",
+          "شهرک صنعتی توس",
+          "حرم مطهر",
+          "کوهسنگی",
+          "هاشمیه",
+          "احمدآباد"
+        ],
+        "max_pop": 0.9,
+        "first_sent_at": "2026-08-16T08:16:41.135280+00:00",
+        "last_sent_at": "2026-08-16T08:16:41.135295+00:00",
+        "resend_count": 0,
+        "status": "PENDING_ACK"
+      }
+    }
+  },
   "last_daily_brief": "2026-08-16T07:56:11.985584+00:00"
 }
