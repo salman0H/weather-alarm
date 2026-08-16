@@ -38,9 +38,9 @@ ACKED / EXPIRED --(new alert appears)--> PENDING_ACK
 
 ## API Inputs/Outputs
 
-### 1. OpenWeatherMap One Call — `weather_client.fetch_alerts_for_zone`
-Input: `lat`, `lon`, `appid`, `exclude=current,minutely,hourly,daily`, `lang=fa`
-Output (Relevant section):
+### 1. OpenWeatherMap One Call — `weather_client.fetch_weather_data_for_zone`
+Input: `lat`, `lon`, `appid`, `exclude=current,minutely`, `lang=fa`
+Output (Relevant sections):
 ```json
 {
   "alerts": [
@@ -52,14 +52,20 @@ Output (Relevant section):
       "description": "string",
       "tags": ["Flood"]
     }
+  ],
+  "hourly": [
+    {
+      "pop": 0.85
+    }
   ]
 }
 ```
-Full sample: `tests/fixtures/sample_alert.json`
+*Note: The script extracts the maximum Probability of Precipitation (`pop`) from the `hourly` data over the next 24 hours to enforce data-driven insights.*
+Full sample: `tests/fixtures/sample_alert.json` (Mock mode is disabled in production to enforce live data).
 
 ### 2. Groq — `groq_client.summarize_description`
-Input: `event`, `description`
-Output: A deterministic, simple Persian string suitable for dispatch (formatted with HTML tags, no Markdown headers).
+Input: `event`, `description`, `probability`
+Output: A deterministic, simple Persian string suitable for dispatch (formatted with HTML tags, no Markdown headers). It explicitly includes the statistical probability extracted from the OpenWeatherMap API (e.g., "Probability of occurrence: 85%").
 
 ### 3. Telegram — `telegram_client`
 `send_message(token, chat_id, text, reply_markup)` → Sends the message along with an Inline Keyboard containing the MD5 alert hash.
