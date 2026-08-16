@@ -32,7 +32,7 @@ SENT_ALERTS = []
 SENT_BRIEFS = []
 
 
-def fake_send_alert(telegram_token, groq_api_key, chat_id, alert, phone_number=None, aqi=-1, dominant_pollutant="unknown"):
+def fake_send_alert(telegram_token, groq_api_key, chat_id, alert, phone_number=None, aqi=-1, dominant_pollutant="unknown", is_degraded=False, devex_footer=None):
     """Monkeypatch replacement for wac.send_alert_dispatch"""
     SENT_ALERTS.append((chat_id, alert["event"]))
     return f"[mock alert message for {alert['event']}]"
@@ -44,7 +44,7 @@ def fake_send_message(telegram_token, chat_id, message, reply_markup=None):
     return "[mock brief message]"
 
 
-def fake_generate_daily_brief(api_key, analytics_json, timeout=15):
+def fake_generate_daily_brief(api_key, analytics_json, is_degraded_mode=False, timeout=15):
     """Monkeypatch replacement for groq_client.generate_daily_brief"""
     return "Mocked Persian AI Brief"
 
@@ -64,7 +64,7 @@ def run():
         "subscribers": {"999": {"phone_number": None, "active_alert": None}},
     }
 
-    current_alerts, metrics, hourly_data, tz_offset, dynamic_zone_profiles = wac.collect_alerts_across_zones("unused", "unused")
+    current_alerts, metrics, hourly_data, tz_offset, dynamic_zone_profiles, waqi_status, owm_status, is_degraded = wac.collect_alerts_across_zones("unused", "unused")
     assert len(current_alerts) >= 1, (
         f"Expected at least one alert from fixture; got {len(current_alerts)}. "
         "Check tests/fixtures/sample_alert.json."

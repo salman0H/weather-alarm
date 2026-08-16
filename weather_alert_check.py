@@ -118,7 +118,7 @@ def collect_alerts_across_zones(owm_api_key, waqi_token):
         "aqi_dominant": "unknown"
     }
     
-    waqi_data = weather_client.fetch_waqi_data(waqi_token)
+    waqi_data, waqi_status = weather_client.fetch_waqi_data(waqi_token)
     global_metrics["aqi"] = waqi_data.get("aqi", -1)
     global_metrics["aqi_dominant"] = waqi_data.get("dominant", "unknown")
     
@@ -128,10 +128,13 @@ def collect_alerts_across_zones(owm_api_key, waqi_token):
     tz_offset = 0
     
     dynamic_zone_profiles = {}
+    owm_statuses = []
 
     for zone in load_zones():
-        payload = weather_client.fetch_weather_data_for_zone(zone["lat"], zone["lon"], owm_api_key)
-        
+        payload, owm_status = weather_client.fetch_weather_data_for_zone(zone["lat"], zone["lon"], owm_api_key)
+        if owm_status not in owm_statuses:
+            owm_statuses.append(owm_status)
+            
         if not tz_offset:
             tz_offset = payload.get("timezone_offset", 12600)
             
@@ -191,7 +194,10 @@ def collect_alerts_across_zones(owm_api_key, waqi_token):
         global_metrics["current_temp_avg"] = total_temp / global_metrics["zones_count"]
         global_metrics["current_hum_avg"] = total_hum / global_metrics["zones_count"]
 
-    return merged, global_metrics, all_hourly_data, tz_offset, dynamic_zone_profiles
+    owm_status_str = ",".join(owm_statuses)
+    is_degraded = (waqi_status != "200") or any(s != "200" for s in owm_statuses)
+
+    return merged, global_metrics, all_hourly_data, tz_offset, dynamic_zone_profiles, waqi_status, owm_status_str, is_degraded
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -212,11 +218,11 @@ def format_time(unix_ts):
     dt = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
     return dt.strftime("%Y-%m-%d %H:%M UTC")
 
-def build_alert_message(level_info, level, event, summary, zones_list, start, end):
+def build_alert_message(level_info, level, event, summary, zones_list, start, end, devex_footer=None):
     zones_text = ", ".join(zones_list)
     tips = severity.get_safety_tips(level)
     tips_text = "\n".join(f"• {tip}" for tip in tips)
-    return (
+    base_msg = (
         f"🚨 <b>WEATHER ALERT — {event}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"📍 <b>Affected Zones:</b> {zones_text}\n"
@@ -226,12 +232,15 @@ def build_alert_message(level_info, level, event, summary, zones_list, start, en
         f"💡 <b>Safety Guidance</b>\n{tips_text}\n\n"
         f"<i>Tap ✅ Acknowledge to dismiss.</i>"
     )
+    if devex_footer:
+        base_msg += f"\n\n🛠️ <b>Developer Context:</b>\n<code>{devex_footer}</code>"
+    return base_msg
 
 def dispatch_sms(phone_number, message):
     if phone_number:
         pass
 
-def send_alert_dispatch(telegram_token, groq_api_key, chat_id, alert, phone_number=None, aqi=-1, dominant_pollutant="unknown"):
+def send_alert_dispatch(telegram_token, groq_api_key, chat_id, alert, phone_number=None, aqi=-1, dominant_pollutant="unknown", is_degraded=False, devex_footer=None):
     level = severity.classify_severity(alert["event"])
     level_info = severity.SEVERITY_LEVELS[level]
     
@@ -241,12 +250,14 @@ def send_alert_dispatch(telegram_token, groq_api_key, chat_id, alert, phone_numb
     summary = groq_client.generate_alert_message(
         api_key=groq_api_key,
         description=f"Air Quality (AQI): {aqi}, Dominant Pollutant: {dominant_pollutant}. {alert['description']}",
-        probability=prob_percentage
+        probability=prob_percentage,
+        is_degraded_mode=is_degraded
     )
 
     message = build_alert_message(
         level_info, level, alert["event"], summary,
-        alert["zones"], alert["start"], alert["end"]
+        alert["zones"], alert["start"], alert["end"],
+        devex_footer=devex_footer
     )
     
     if phone_number:
@@ -265,7 +276,7 @@ def send_alert_dispatch(telegram_token, groq_api_key, chat_id, alert, phone_numb
     telegram_client.send_message(telegram_token, chat_id, message, reply_markup=reply_markup)
     return message
 
-def route_and_dispatch(current_state, authorized_user_id, current_alerts, global_metrics, hourly_data, tz_offset, dynamic_zone_profiles, telegram_token, groq_api_key, log):
+def route_and_dispatch(current_state, authorized_user_id, current_alerts, global_metrics, hourly_data, tz_offset, dynamic_zone_profiles, telegram_token, groq_api_key, log, is_degraded=False, devex_footer=None, test_or_mock=False):
     """
     Guarantees a single Telegram dispatch based on strict State Machine routing.
     """
@@ -318,8 +329,8 @@ def route_and_dispatch(current_state, authorized_user_id, current_alerts, global
                 should_send_new = True
             else:
                 # Existing active alert
-                if minutes_since(active["last_sent_at"]) >= RESEND_INTERVAL_MINUTES:
-                    send_alert_dispatch(telegram_token, groq_api_key, authorized_user_id, active, phone_number, global_metrics["aqi"], global_metrics["aqi_dominant"])
+                if test_or_mock or minutes_since(active["last_sent_at"]) >= RESEND_INTERVAL_MINUTES:
+                    send_alert_dispatch(telegram_token, groq_api_key, authorized_user_id, active, phone_number, global_metrics["aqi"], global_metrics["aqi_dominant"], is_degraded, devex_footer)
                     active["last_sent_at"] = now_iso()
                     active["resend_count"] += 1
                     log(f"[{authorized_user_id}] Resend #{active['resend_count']} for: {active['event']}")
@@ -328,9 +339,12 @@ def route_and_dispatch(current_state, authorized_user_id, current_alerts, global
                 should_send_new = True
             elif first_alert["alert_id"] != active.get("alert_id"):
                 should_send_new = True
+            elif test_or_mock:
+                # Force resend in test/mock mode even if ACKED, to guarantee dispatch
+                should_send_new = True
 
         if should_send_new:
-            send_alert_dispatch(telegram_token, groq_api_key, authorized_user_id, first_alert, phone_number, global_metrics["aqi"], global_metrics["aqi_dominant"])
+            send_alert_dispatch(telegram_token, groq_api_key, authorized_user_id, first_alert, phone_number, global_metrics["aqi"], global_metrics["aqi_dominant"], is_degraded, devex_footer)
             subscriber["active_alert"] = {
                 **first_alert,
                 "first_sent_at": now_iso(),
@@ -355,8 +369,11 @@ def route_and_dispatch(current_state, authorized_user_id, current_alerts, global
             }
         }
         
-        summary = groq_client.generate_daily_brief(groq_api_key, json.dumps(prompt_data, ensure_ascii=False))
+        summary = groq_client.generate_daily_brief(groq_api_key, json.dumps(prompt_data, ensure_ascii=False), is_degraded_mode=is_degraded)
         
+        if devex_footer:
+            summary += f"\n\n🛠️ <b>Developer Context:</b>\n<code>{devex_footer}</code>"
+            
         telegram_client.send_message(telegram_token, authorized_user_id, summary)
         log(f"[{authorized_user_id}] Clear Skies daily brief dispatched via LLM.")
 
@@ -368,12 +385,13 @@ def main():
     authorized_user_id = os.environ.get("AUTHORIZED_USER_ID")
     waqi_token = os.environ.get("WAQI_TOKEN", "e92b7626f7f331e6ecd4cdebc8be5b6cfd1bc60f")
     test_mode = os.environ.get("TEST_MODE", "false").lower() == "true"
+    mock_alert = os.environ.get("MOCK_ALERT", "false").lower() == "true"
 
     def log(msg):
         print(msg, file=sys.stderr)
 
-    if test_mode:
-        log("[Pipeline] TEST_MODE=true — loading local fixture; relaxing API key guards.")
+    if test_mode or mock_alert:
+        log(f"[Pipeline] Running in Test/Mock mode (TEST_MODE={test_mode}, MOCK_ALERT={mock_alert})")
         owm_api_key = owm_api_key or "TEST_MODE_PLACEHOLDER"
         groq_api_key = groq_api_key or "TEST_MODE_PLACEHOLDER"
     else:
@@ -391,7 +409,25 @@ def main():
         sys.exit(1)
 
     # 1. Data Collection & Extraction
-    current_alerts, global_metrics, hourly_data, tz_offset, dynamic_zone_profiles = collect_alerts_across_zones(owm_api_key, waqi_token)
+    current_alerts, global_metrics, hourly_data, tz_offset, dynamic_zone_profiles, waqi_status, owm_status, is_degraded = collect_alerts_across_zones(owm_api_key, waqi_token)
+    
+    # Check if mock alert is forced
+    if mock_alert:
+        with open(MOCK_FIXTURE_PATH, "r", encoding="utf-8") as f:
+            mock_payload = json.load(f)
+            for alert in mock_payload.get("alerts", []):
+                aid = alert_id_for(alert)
+                if aid not in current_alerts:
+                    current_alerts[aid] = {
+                        "alert_id": aid,
+                        "event": alert.get("event"),
+                        "description": alert.get("description"),
+                        "start": alert.get("start"),
+                        "end": alert.get("end"),
+                        "zones": ["All Mashhad Zones"],
+                        "max_pop": 0.90
+                    }
+                    
     log(
         f"[Pipeline] Active alerts: {len(current_alerts)} | "
         f"MaxWind={global_metrics['max_wind']:.1f}m/s "
@@ -402,10 +438,15 @@ def main():
 
     current_state = state_module.load_state()
 
+    devex_footer = None
+    if test_mode or mock_alert:
+        devex_footer = f"TEST_MODE={test_mode} | MOCK_ALERT={mock_alert} | OWM={owm_status} | WAQI={waqi_status}"
+
     # 2. State Machine Routing & Dispatch
     route_and_dispatch(
         current_state, authorized_user_id, current_alerts, global_metrics, 
-        hourly_data, tz_offset, dynamic_zone_profiles, telegram_token, groq_api_key, log
+        hourly_data, tz_offset, dynamic_zone_profiles, telegram_token, groq_api_key, log,
+        is_degraded=is_degraded, devex_footer=devex_footer, test_or_mock=(test_mode or mock_alert)
     )
 
     state_module.save_state(current_state)

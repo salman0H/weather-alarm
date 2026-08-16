@@ -19,6 +19,9 @@ ALERT_SYSTEM_PROMPT = (
     "Output must be strictly in Persian. "
     "Rewrite the official alert description into a maximum of two simple, public-friendly sentences. "
     "Do not add any safety recommendations—only explain what is happening. "
+    "If specific data fields are missing, DO NOT print 'Not available' or 'Unknown'. "
+    "Instead, dynamically adjust the UI layout to completely hide/remove those sections. "
+    "The final message must always look premium, complete, and perfectly formatted. "
     "You MUST explicitly include an 'Air Quality Report' section in the output if AQI data is provided. "
     "Use appropriate emojis for air quality (e.g., 😷 for high AQI, 🍃 for good AQI, 🌫️ for moderate). "
     "You MUST NOT invent, estimate, or hallucinate any weather metrics. "
@@ -33,6 +36,9 @@ ALERT_SYSTEM_PROMPT = (
 BRIEF_SYSTEM_PROMPT = (
     "You are a strict data-to-text parser generating a daily intelligence brief. "
     "Output must be strictly in Persian. "
+    "If specific data fields are missing, DO NOT print 'Not available' or 'Unknown'. "
+    "Instead, dynamically adjust the UI layout to completely hide/remove those sections. "
+    "The final message must always look premium, complete, and perfectly formatted. "
     "You MUST explicitly include an 'Air Quality Report' section in the output if AQI data is provided. "
     "Use appropriate emojis for air quality (e.g., 😷 for high AQI, 🍃 for good AQI, 🌫️ for moderate). "
     "You MUST ONLY use the exact numerical values provided for each time period. "
@@ -91,16 +97,25 @@ def _call_groq(api_key, system_prompt, user_content, timeout=15):
         return FALLBACK_SUMMARY
 
 
-def generate_alert_message(api_key, description, probability=0, timeout=15):
+def generate_alert_message(api_key, description, probability=0, is_degraded_mode=False, timeout=15):
     """
     Calls the Groq Chat Completions API to produce a concise Persian alert summary.
     """
     formatted_prompt = ALERT_SYSTEM_PROMPT.format(probability=probability)
+    if is_degraded_mode:
+        formatted_prompt += "\n\nIf 'is_degraded_mode' is True, intelligently insert a beautiful, polite system notice at the top of the message explaining that the dashboard is currently operating on cached/fallback data due to upstream sensor maintenance."
+        description = f"is_degraded_mode=True\n\n{description}"
+        
     return _call_groq(api_key, formatted_prompt, description, timeout)
 
 
-def generate_daily_brief(api_key, analytics_json, timeout=15):
+def generate_daily_brief(api_key, analytics_json, is_degraded_mode=False, timeout=15):
     """
     Generates a daily brief in Persian given the chronological metrics.
     """
-    return _call_groq(api_key, BRIEF_SYSTEM_PROMPT, analytics_json, timeout)
+    formatted_prompt = BRIEF_SYSTEM_PROMPT
+    if is_degraded_mode:
+        formatted_prompt += "\n\nIf 'is_degraded_mode' is True, intelligently insert a beautiful, polite system notice at the top of the message explaining that the dashboard is currently operating on cached/fallback data due to upstream sensor maintenance."
+        analytics_json = f"is_degraded_mode=True\n\n{analytics_json}"
+        
+    return _call_groq(api_key, formatted_prompt, analytics_json, timeout)
