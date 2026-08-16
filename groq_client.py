@@ -19,6 +19,8 @@ ALERT_SYSTEM_PROMPT = (
     "Output must be strictly in Persian. "
     "Rewrite the official alert description into a maximum of two simple, public-friendly sentences. "
     "Do not add any safety recommendations—only explain what is happening. "
+    "You MUST explicitly include an 'Air Quality Report' section in the output if AQI data is provided. "
+    "Use appropriate emojis for air quality (e.g., 😷 for high AQI, 🍃 for good AQI, 🌫️ for moderate). "
     "You MUST NOT invent, estimate, or hallucinate any weather metrics. "
     "Use ONLY the numerical data provided in the user message. If a metric is absent, omit it entirely. "
     "Format the output using simple HTML tags (like <b> or <i>) if emphasis is needed, "
@@ -31,11 +33,13 @@ ALERT_SYSTEM_PROMPT = (
 BRIEF_SYSTEM_PROMPT = (
     "You are a strict data-to-text parser generating a daily intelligence brief. "
     "Output must be strictly in Persian. "
+    "You MUST explicitly include an 'Air Quality Report' section in the output if AQI data is provided. "
+    "Use appropriate emojis for air quality (e.g., 😷 for high AQI, 🍃 for good AQI, 🌫️ for moderate). "
     "You MUST ONLY use the exact numerical values provided for each time period. "
     "Do not infer trends beyond what the numbers directly show. "
     "Format using Telegram HTML tags (<b>, <i>, <code>). "
     "Use visual dividers, relevant emojis (🌤️, 📉, 💨), and clear hierarchical sections "
-    "like '📅 Today\\'s Intelligence Brief', '🕒 Chronological Forecast', '📍 Zone Analysis'."
+    "like '📅 Today\\'s Intelligence Brief', '🕒 Chronological Forecast', '📍 Zone Analysis', and '🌬️ Air Quality Report'."
 )
 
 # Returned when the LLM call fails (network error, auth failure, rate limit, etc.)

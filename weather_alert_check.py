@@ -104,7 +104,7 @@ def compute_day_part_analytics(hourly_data, timezone_offset_secs):
     
     return analytics
 
-def collect_alerts_across_zones(owm_api_key):
+def collect_alerts_across_zones(owm_api_key, waqi_token):
     merged = {}
     global_metrics = {
         "max_pop": 0.0,
@@ -113,13 +113,21 @@ def collect_alerts_across_zones(owm_api_key):
         "max_temp": -99.0,
         "current_temp_avg": 0.0,
         "current_hum_avg": 0.0,
-        "zones_count": 0
+        "zones_count": 0,
+        "aqi": -1,
+        "aqi_dominant": "unknown"
     }
+    
+    waqi_data = weather_client.fetch_waqi_data(waqi_token)
+    global_metrics["aqi"] = waqi_data.get("aqi", -1)
+    global_metrics["aqi_dominant"] = waqi_data.get("dominant", "unknown")
     
     total_temp = 0
     total_hum = 0
     all_hourly_data = []
     tz_offset = 0
+    
+    dynamic_zone_profiles = {}
 
     for zone in load_zones():
         payload = weather_client.fetch_weather_data_for_zone(zone["lat"], zone["lon"], owm_api_key)
@@ -152,6 +160,15 @@ def collect_alerts_across_zones(owm_api_key):
             max_pop = max((hour.get("pop", 0) for hour in next_24_hours), default=0.0)
             
         global_metrics["max_pop"] = max(global_metrics["max_pop"], max_pop)
+        
+        dynamic_zone_profiles[zone["zone"]] = {
+            "description": ZONE_PROFILES.get(zone["zone"], ""),
+            "temp": temp,
+            "wind": wind,
+            "pop": max_pop,
+            "aqi": global_metrics["aqi"],
+            "dominant_pollutant": global_metrics["aqi_dominant"]
+        }
             
         for alert in raw_alerts:
             aid = alert_id_for(alert)
@@ -174,7 +191,7 @@ def collect_alerts_across_zones(owm_api_key):
         global_metrics["current_temp_avg"] = total_temp / global_metrics["zones_count"]
         global_metrics["current_hum_avg"] = total_hum / global_metrics["zones_count"]
 
-    return merged, global_metrics, all_hourly_data, tz_offset
+    return merged, global_metrics, all_hourly_data, tz_offset, dynamic_zone_profiles
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -214,15 +231,16 @@ def dispatch_sms(phone_number, message):
     if phone_number:
         pass
 
-def send_alert_dispatch(telegram_token, groq_api_key, chat_id, alert, phone_number=None):
+def send_alert_dispatch(telegram_token, groq_api_key, chat_id, alert, phone_number=None, aqi=-1, dominant_pollutant="unknown"):
     level = severity.classify_severity(alert["event"])
     level_info = severity.SEVERITY_LEVELS[level]
     
     prob_percentage = int(alert.get("max_pop", 0) * 100)
     
+    # Pass AQI info to the alert message payload
     summary = groq_client.generate_alert_message(
         api_key=groq_api_key,
-        description=alert["description"],
+        description=f"Air Quality (AQI): {aqi}, Dominant Pollutant: {dominant_pollutant}. {alert['description']}",
         probability=prob_percentage
     )
 
@@ -247,7 +265,7 @@ def send_alert_dispatch(telegram_token, groq_api_key, chat_id, alert, phone_numb
     telegram_client.send_message(telegram_token, chat_id, message, reply_markup=reply_markup)
     return message
 
-def route_and_dispatch(current_state, authorized_user_id, current_alerts, global_metrics, hourly_data, tz_offset, telegram_token, groq_api_key, log):
+def route_and_dispatch(current_state, authorized_user_id, current_alerts, global_metrics, hourly_data, tz_offset, dynamic_zone_profiles, telegram_token, groq_api_key, log):
     """
     Guarantees a single Telegram dispatch based on strict State Machine routing.
     """
@@ -256,7 +274,7 @@ def route_and_dispatch(current_state, authorized_user_id, current_alerts, global
     # Analysis & State determination
     if current_alerts:
         state_enum = PipelineState.ALERT
-    elif global_metrics["max_wind"] > 15 or global_metrics["max_pop"] > 0.70:
+    elif global_metrics["max_wind"] > 15 or global_metrics["max_pop"] > 0.70 or global_metrics["aqi"] > 150:
         state_enum = PipelineState.PREDICTIVE_WARNING
 
     subscriber = state_module.get_subscriber(current_state, authorized_user_id)
@@ -267,11 +285,20 @@ def route_and_dispatch(current_state, authorized_user_id, current_alerts, global
         # We handle predictive warning as an alert payload
         if state_enum == PipelineState.PREDICTIVE_WARNING:
             now_ts = int(datetime.now(timezone.utc).timestamp())
+            
+            risk_reasons = []
+            if global_metrics['max_wind'] > 15:
+                risk_reasons.append(f"Wind {global_metrics['max_wind']}m/s")
+            if global_metrics['max_pop'] > 0.70:
+                risk_reasons.append(f"Precipitation Prob {global_metrics['max_pop']*100}%")
+            if global_metrics['aqi'] > 150:
+                risk_reasons.append(f"Hazardous Air Quality (AQI {global_metrics['aqi']})")
+                
             alert_payload = {
                 "event": "Predictive Warning",
                 "start": now_ts,
                 "end": now_ts + (4 * 3600),
-                "description": f"Predictive Engine detected high risk conditions: Wind {global_metrics['max_wind']}m/s, Precipitation Prob {global_metrics['max_pop']*100}%.",
+                "description": f"Predictive Engine detected high risk conditions: {', '.join(risk_reasons)}.",
                 "max_pop": global_metrics["max_pop"],
                 "zones": ["All Mashhad Zones"]
             }
@@ -292,16 +319,18 @@ def route_and_dispatch(current_state, authorized_user_id, current_alerts, global
             else:
                 # Existing active alert
                 if minutes_since(active["last_sent_at"]) >= RESEND_INTERVAL_MINUTES:
-                    send_alert_dispatch(telegram_token, groq_api_key, authorized_user_id, active, phone_number)
+                    send_alert_dispatch(telegram_token, groq_api_key, authorized_user_id, active, phone_number, global_metrics["aqi"], global_metrics["aqi_dominant"])
                     active["last_sent_at"] = now_iso()
                     active["resend_count"] += 1
                     log(f"[{authorized_user_id}] Resend #{active['resend_count']} for: {active['event']}")
         else: # ACKED or EXPIRED
-            if first_alert["alert_id"] != active.get("alert_id"):
+            if active["alert_id"] not in current_alerts and current_alerts:
+                should_send_new = True
+            elif first_alert["alert_id"] != active.get("alert_id"):
                 should_send_new = True
 
         if should_send_new:
-            send_alert_dispatch(telegram_token, groq_api_key, authorized_user_id, first_alert, phone_number)
+            send_alert_dispatch(telegram_token, groq_api_key, authorized_user_id, first_alert, phone_number, global_metrics["aqi"], global_metrics["aqi_dominant"])
             subscriber["active_alert"] = {
                 **first_alert,
                 "first_sent_at": now_iso(),
@@ -319,7 +348,11 @@ def route_and_dispatch(current_state, authorized_user_id, current_alerts, global
         
         prompt_data = {
             "analytics": day_part_analytics,
-            "zone_context": ZONE_PROFILES
+            "zone_context": dynamic_zone_profiles,
+            "global_air_quality": {
+                "aqi": global_metrics["aqi"],
+                "dominant_pollutant": global_metrics["aqi_dominant"]
+            }
         }
         
         summary = groq_client.generate_daily_brief(groq_api_key, json.dumps(prompt_data, ensure_ascii=False))
@@ -333,6 +366,7 @@ def main():
     owm_api_key = os.environ.get("OWM_API_KEY", "")
     groq_api_key = os.environ.get("GROQ_API_KEY")
     authorized_user_id = os.environ.get("AUTHORIZED_USER_ID")
+    waqi_token = os.environ.get("WAQI_TOKEN", "e92b7626f7f331e6ecd4cdebc8be5b6cfd1bc60f")
     test_mode = os.environ.get("TEST_MODE", "false").lower() == "true"
 
     def log(msg):
@@ -357,12 +391,13 @@ def main():
         sys.exit(1)
 
     # 1. Data Collection & Extraction
-    current_alerts, global_metrics, hourly_data, tz_offset = collect_alerts_across_zones(owm_api_key)
+    current_alerts, global_metrics, hourly_data, tz_offset, dynamic_zone_profiles = collect_alerts_across_zones(owm_api_key, waqi_token)
     log(
         f"[Pipeline] Active alerts: {len(current_alerts)} | "
         f"MaxWind={global_metrics['max_wind']:.1f}m/s "
         f"MaxPoP={global_metrics['max_pop'] * 100:.0f}% "
-        f"AvgTemp={global_metrics['current_temp_avg']:.1f}°C"
+        f"AvgTemp={global_metrics['current_temp_avg']:.1f}°C "
+        f"AQI={global_metrics['aqi']}"
     )
 
     current_state = state_module.load_state()
@@ -370,7 +405,7 @@ def main():
     # 2. State Machine Routing & Dispatch
     route_and_dispatch(
         current_state, authorized_user_id, current_alerts, global_metrics, 
-        hourly_data, tz_offset, telegram_token, groq_api_key, log
+        hourly_data, tz_offset, dynamic_zone_profiles, telegram_token, groq_api_key, log
     )
 
     state_module.save_state(current_state)

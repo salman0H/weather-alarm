@@ -32,7 +32,7 @@ SENT_ALERTS = []
 SENT_BRIEFS = []
 
 
-def fake_send_alert(telegram_token, groq_api_key, chat_id, alert, phone_number=None):
+def fake_send_alert(telegram_token, groq_api_key, chat_id, alert, phone_number=None, aqi=-1, dominant_pollutant="unknown"):
     """Monkeypatch replacement for wac.send_alert_dispatch"""
     SENT_ALERTS.append((chat_id, alert["event"]))
     return f"[mock alert message for {alert['event']}]"
@@ -64,7 +64,7 @@ def run():
         "subscribers": {"999": {"phone_number": None, "active_alert": None}},
     }
 
-    current_alerts, metrics, hourly_data, tz_offset = wac.collect_alerts_across_zones(owm_api_key="unused")
+    current_alerts, metrics, hourly_data, tz_offset, dynamic_zone_profiles = wac.collect_alerts_across_zones("unused", "unused")
     assert len(current_alerts) >= 1, (
         f"Expected at least one alert from fixture; got {len(current_alerts)}. "
         "Check tests/fixtures/sample_alert.json."
@@ -72,7 +72,7 @@ def run():
     print(f"[Test] Loaded {len(current_alerts)} alert(s). Metrics: MaxPop={metrics['max_pop']} MaxWind={metrics['max_wind']}")
 
     # Phase 1: First check — initial dispatch expected
-    wac.route_and_dispatch(fresh_state, "999", current_alerts, metrics, hourly_data, tz_offset, "tok", "key", print)
+    wac.route_and_dispatch(fresh_state, "999", current_alerts, metrics, hourly_data, tz_offset, dynamic_zone_profiles, "tok", "key", print)
     assert fresh_state["subscribers"]["999"]["active_alert"]["status"] == "PENDING_ACK", (
         "After first check, subscriber status must be PENDING_ACK."
     )
@@ -80,7 +80,7 @@ def run():
     print("PASS Phase 1: Initial alert dispatch succeeded.")
 
     # Phase 2: Immediate re-check — resend interval not elapsed; no dispatch
-    wac.route_and_dispatch(fresh_state, "999", current_alerts, metrics, hourly_data, tz_offset, "tok", "key", print)
+    wac.route_and_dispatch(fresh_state, "999", current_alerts, metrics, hourly_data, tz_offset, dynamic_zone_profiles, "tok", "key", print)
     assert len(SENT_ALERTS) == 1, (
         "No resend should occur before RESEND_INTERVAL_MINUTES has elapsed."
     )
@@ -91,7 +91,7 @@ def run():
     print("PASS Phase 3: Acknowledgment simulated (/ok).")
 
     # Phase 4: Post-ACKED check — same alert still present but ACKED; no re-dispatch
-    wac.route_and_dispatch(fresh_state, "999", current_alerts, metrics, hourly_data, tz_offset, "tok", "key", print)
+    wac.route_and_dispatch(fresh_state, "999", current_alerts, metrics, hourly_data, tz_offset, dynamic_zone_profiles, "tok", "key", print)
     assert len(SENT_ALERTS) == 1, (
         "After ACKED, the same alert must not be re-dispatched."
     )
@@ -105,14 +105,26 @@ def run():
     # Simulate calm conditions with no alerts
     metrics["max_wind"] = 10.0
     metrics["max_pop"] = 0.50
+    metrics["aqi"] = 85
     
-    wac.route_and_dispatch(fresh_state, "999", {}, metrics, hourly_data, tz_offset, "tok", "key", print)
+    wac.route_and_dispatch(fresh_state, "999", {}, metrics, hourly_data, tz_offset, dynamic_zone_profiles, "tok", "key", print)
     assert len(SENT_ALERTS) == 0, "No alerts should be sent in CLEAR_SKIES."
     assert len(SENT_BRIEFS) == 1, "Exactly one daily brief should be dispatched."
     assert fresh_state["subscribers"]["999"]["active_alert"]["status"] == "EXPIRED", (
         "Previous active alert should be marked EXPIRED upon clearing."
     )
     print("PASS Phase 5: CLEAR_SKIES path correctly routed to daily brief.")
+    
+    # Phase 6: High AQI Predictive Warning
+    print("\n--- Testing High AQI Risk Engine ---")
+    SENT_ALERTS.clear()
+    SENT_BRIEFS.clear()
+    metrics["aqi"] = 160
+    
+    wac.route_and_dispatch(fresh_state, "999", {}, metrics, hourly_data, tz_offset, dynamic_zone_profiles, "tok", "key", print)
+    assert len(SENT_ALERTS) == 1, "High AQI should trigger a predictive warning alert."
+    assert "Predictive Warning" in SENT_ALERTS[0][1], "Event should be Predictive Warning."
+    print("PASS Phase 6: High AQI successfully triggered predictive warning.")
 
     print("\nAll pipeline tests passed successfully.")
 

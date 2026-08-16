@@ -88,3 +88,49 @@ def _load_fixture():
         print(f"[OWM] Fixture JSON error: {e}", file=sys.stderr)
         return {}
 
+def fetch_waqi_data(token, timeout=10):
+    """
+    Fetches the real-time Air Quality Index (AQI) from the WAQI API for Mashhad.
+
+    Args:
+        token (str): WAQI API token.
+        timeout (int): Socket timeout in seconds.
+
+    Returns:
+        dict: A simplified dictionary with 'aqi' and 'dominant' pollutant.
+              Returns a safe default (e.g., {'aqi': -1, 'dominant': 'unknown'}) on failure.
+    """
+    if os.environ.get("TEST_MODE", "false").lower() == "true":
+        return {"aqi": 85, "dominant": "pm25"}
+
+    url = f"https://api.waqi.info/feed/mashhad/?token={token}"
+    request = urllib.request.Request(url, headers={"User-Agent": "weather-alert-bot/1.0"})
+    
+    fallback = {"aqi": -1, "dominant": "unknown"}
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        
+        if payload.get("status") == "ok":
+            data = payload.get("data", {})
+            return {
+                "aqi": data.get("aqi", -1),
+                "dominant": data.get("dominentpol", "unknown")
+            }
+        else:
+            print(f"[WAQI] API returned non-ok status: {payload.get('data')}", file=sys.stderr)
+            return fallback
+    except urllib.error.HTTPError as e:
+        print(f"[WAQI] HTTP {e.code} {e.reason}", file=sys.stderr)
+        return fallback
+    except urllib.error.URLError as e:
+        print(f"[WAQI] Network error — {e.reason}", file=sys.stderr)
+        return fallback
+    except json.JSONDecodeError as e:
+        print(f"[WAQI] JSON parse error — {e}", file=sys.stderr)
+        return fallback
+    except Exception as e:
+        print(f"[WAQI] Unexpected error — {e}", file=sys.stderr)
+        return fallback
+

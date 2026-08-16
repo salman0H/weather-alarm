@@ -5,14 +5,14 @@ on:
     - cron: "*/20 * * * *"
   workflow_dispatch:
     inputs:
-      mock:
-        description: "Run with mock alert fixture for testing (true/false)"
-        required: false
-        default: "false"
       test_mode:
-        description: "Run in TEST_MODE: load local fixture, bypass OWM API key check (true/false)"
-        required: false
-        default: "false"
+        description: 'Enable Test Mode (Use Local JSON)'
+        type: boolean
+        default: false
+      mock_alert:
+        description: 'Force a Mock Severe Alert'
+        type: boolean
+        default: false
 
 jobs:
   check-alerts:
@@ -36,8 +36,9 @@ jobs:
           OWM_API_KEY: ${{ secrets.OWM_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           AUTHORIZED_USER_ID: ${{ secrets.AUTHORIZED_USER_ID }}
-          MOCK_ALERT: ${{ github.event.inputs.mock || 'false' }}
+          WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
           TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
+          MOCK_ALERT: ${{ github.event.inputs.mock_alert || 'false' }}
         run: python weather_alert_check.py
 
       - name: Commit updated state
