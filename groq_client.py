@@ -63,6 +63,7 @@ def _call_groq(api_key, system_prompt, user_content, timeout=15):
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "User-Agent": "UrbanWeatherIntelligence/1.0",
         },
         method="POST",
     )
@@ -72,7 +73,11 @@ def _call_groq(api_key, system_prompt, user_content, timeout=15):
             payload = json.loads(response.read().decode("utf-8"))
         return payload["choices"][0]["message"]["content"].strip()
     except urllib.error.HTTPError as e:
-        print(f"[Groq] HTTP {e.code} {e.reason} — LLM summary skipped.", file=sys.stderr)
+        try:
+            error_body = e.read().decode("utf-8")
+        except Exception:
+            error_body = "Could not read error body."
+        print(f"[Groq] HTTP {e.code} {e.reason} — LLM summary skipped. Details: {error_body}", file=sys.stderr)
         return FALLBACK_SUMMARY
     except urllib.error.URLError as e:
         print(f"[Groq] Network error — {e.reason}.", file=sys.stderr)
