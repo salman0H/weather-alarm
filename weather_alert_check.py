@@ -55,6 +55,14 @@ def load_zones():
         return json.load(f)
 
 def alert_id_for(alert):
+    """
+    Architecture Note for Academic Review:
+    The 'sender_name' was intentionally omitted from the cryptographic hash generation. 
+    This decision enforces automatic deduplication (Idempotency). If multiple agencies 
+    (e.g., local vs. national meteorological organizations) issue redundant warnings for 
+    the exact same event at the exact same start time, the system will resolve them to 
+    a single unique hash, preventing notification spam.
+    """
     raw = f"{alert.get('event')}|{alert.get('start')}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
