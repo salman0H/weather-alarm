@@ -105,7 +105,7 @@ h1, h2, h3 { font-weight: 700; margin: 0; }
     width: 100px; height: 100px; border-radius: 50%;
     display: flex; justify-content: center; align-items: center;
     font-size: 36px; font-weight: 900; color: var(--bg-color);
-    background: conic-gradient(var(--danger) 0%, var(--danger) 92%, #1e293b 92%, #1e293b 100%);
+    background: conic-gradient(var(--danger) 0%, var(--danger) 10%, #1e293b 10%, #1e293b 100%);
     position: relative; box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
 }
 .risk-circle::after {
@@ -134,7 +134,7 @@ h1, h2, h3 { font-weight: 700; margin: 0; }
 <div class="container">
     <div class="header">
         <div class="brand">Mashhad Weather Intelligence</div>
-        <div class="time num">LAST SYNC: 2026-08-16 06:17:33 UTC</div>
+        <div class="time num">LAST SYNC: 2026-08-16 07:29:58 UTC</div>
     </div>
     
     <div class="main-content">
@@ -166,26 +166,21 @@ h1, h2, h3 { font-weight: 700; margin: 0; }
                     <span class="risk-value num" id="risk-counter">0</span>
                 </div>
                 <div class="risk-details">
-                    <div style="font-weight: 700; color: var(--danger); font-size: 18px;">CRITICAL RISK</div>
-                    <div class="risk-reason">Multiple anomalies detected: هشدار سیلاب ناگهانی. Proceed with caution.</div>
+                    <div style="font-weight: 700; color: var(--safe); font-size: 18px;">Low Risk</div>
+                    <div class="risk-reason">No active meteorological warnings in the Mashhad region. Conditions are stable.</div>
                 </div>
             </div>
         </div>
         
         <div class="panel gs-panel" style="margin-bottom: 24px;">
             <h3>AI Weather Briefing</h3>
-            <p class="briefing" style="margin-top: 16px;">Anomalies detected in the Mashhad region. Probability of severe impact is elevated based on recent sensor data. Please review the Active Alerts Center for sector-specific guidance.</p>
+            <p class="briefing" style="margin-top: 16px;">Atmospheric conditions remain stable across all sectors. No anomalies detected in the 24-hour forecast window.</p>
         </div>
         
         <div class="panel gs-panel">
             <h3 style="margin-bottom: 16px;">Active Alerts Center</h3>
             
-            <div class="alert-card" style="border-color: #791F1F">
-                <div class="alert-title">🔴 هشدار سیلاب ناگهانی</div>
-                <div class="alert-desc">به دلیل بارش‌های شدید در مناطق شمالی و شرقی مشهد، احتمال وقوع سیلاب ناگهانی وجود دارد. از تردد در مسیل‌ها و مناطق کم‌ارتفاع خودداری کنید.</div>
-                <div class="alert-meta num">
-                    ZONES: مرکز شهر<br>
-                    START: 1755248400 | END: 1755262800
+            <div class="no-alerts">No active alerts at this time.</div>
                 </div>
             </div>
             
@@ -195,14 +190,14 @@ h1, h2, h3 { font-weight: 700; margin: 0; }
 
 <script>
 // Mock Live Data Animation
-gsap.to("#val-temp", { textContent: 28, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
-gsap.to("#val-hum", { textContent: 45, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
-gsap.to("#val-wind", { textContent: 18, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
-gsap.to("#val-aqi", { textContent: 72, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
+gsap.to("#val-temp", { textContent: 29, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
+gsap.to("#val-hum", { textContent: 42, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
+gsap.to("#val-wind", { textContent: 16, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
+gsap.to("#val-aqi", { textContent: 8, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
 
 // Risk Counter Animation
 gsap.to("#risk-counter", {
-    textContent: 92,
+    textContent: 10,
     duration: 2.5,
     snap: { textContent: 1 },
     ease: "power2.out"
@@ -238,7 +233,7 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     maxZoom: 20
 }).addTo(map);
 
-var zonePoints = [{"zone": "مرکز شهر", "lat": 36.297, "lon": 59.606, "color": "#ef4444", "has_alert": true, "status": "Active Warning"}, {"zone": "وکیل‌آباد", "lat": 36.264, "lon": 59.531, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "طرق", "lat": 36.343, "lon": 59.647, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "قاسم‌آباد", "lat": 36.311, "lon": 59.499, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "الهیه / طلاب", "lat": 36.334, "lon": 59.585, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "شهرک صنعتی توس", "lat": 36.202, "lon": 59.579, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "حرم مطهر", "lat": 36.2878, "lon": 59.6155, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "کوهسنگی", "lat": 36.2731, "lon": 59.5786, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "هاشمیه", "lat": 36.3134, "lon": 59.5076, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "احمدآباد", "lat": 36.2917, "lon": 59.5843, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}];
+var zonePoints = [{"zone": "مرکز شهر", "lat": 36.297, "lon": 59.606, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "وکیل‌آباد", "lat": 36.264, "lon": 59.531, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "طرق", "lat": 36.343, "lon": 59.647, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "قاسم‌آباد", "lat": 36.311, "lon": 59.499, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "الهیه / طلاب", "lat": 36.334, "lon": 59.585, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "شهرک صنعتی توس", "lat": 36.202, "lon": 59.579, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "حرم مطهر", "lat": 36.2878, "lon": 59.6155, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "کوهسنگی", "lat": 36.2731, "lon": 59.5786, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "هاشمیه", "lat": 36.3134, "lon": 59.5076, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}, {"zone": "احمدآباد", "lat": 36.2917, "lon": 59.5843, "color": "#2dd4c8", "has_alert": false, "status": "All Clear"}];
 zonePoints.forEach(function(z) {
     var color = z.color;
     var radius = z.has_alert ? 12 : 6;

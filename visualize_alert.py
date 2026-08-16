@@ -280,10 +280,18 @@ zonePoints.forEach(function(z) {{
 """
 
 
-def render_report(zone_configs, current_alerts, output_path=OUTPUT_PATH):
+import re
+
+def render_report(zone_configs, current_alerts, global_metrics=None, output_path=OUTPUT_PATH):
     """
-    Generates the advanced HTML dashboard.
+    Dynamically updates the existing HTML dashboard using regex and string replacement.
     """
+    if global_metrics is None:
+        global_metrics = {
+            "max_pop": 0.0, "max_wind": 0.0, "max_uvi": 0.0, "max_temp": -99.0,
+            "current_temp_avg": 0.0, "current_hum_avg": 0.0, "zones_count": 0
+        }
+
     affected_zones = set()
     for alert in current_alerts.values():
         affected_zones.update(alert.get("zones", []))
@@ -309,7 +317,6 @@ def render_report(zone_configs, current_alerts, output_path=OUTPUT_PATH):
         alerts_html = '<div class="no-alerts">No active alerts at this time.</div>'
         ai_briefing = "Atmospheric conditions remain stable across all sectors. No anomalies detected in the 24-hour forecast window."
     else:
-        # Determine highest severity
         max_level = 0
         reasons = []
         for alert in current_alerts.values():
@@ -334,7 +341,6 @@ def render_report(zone_configs, current_alerts, output_path=OUTPUT_PATH):
             
         risk_reason = "Multiple anomalies detected: " + ", ".join(set(reasons)) + ". Proceed with caution."
         
-        # Build alert cards
         cards = []
         for alert in current_alerts.values():
             level = severity.classify_severity(alert.get("event", ""))
@@ -354,17 +360,52 @@ def render_report(zone_configs, current_alerts, output_path=OUTPUT_PATH):
         alerts_html = "\n".join(cards)
         ai_briefing = "Anomalies detected in the Mashhad region. Probability of severe impact is elevated based on recent sensor data. Please review the Active Alerts Center for sector-specific guidance."
 
-    html = TEMPLATE.format(
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-        risk_score=risk_score,
-        risk_percentage=risk_score,
-        risk_label=risk_label,
-        risk_color=risk_color,
-        risk_reason=risk_reason,
-        ai_briefing=ai_briefing,
-        alerts_html=alerts_html,
-        zone_points_json=json.dumps(zone_points, ensure_ascii=False)
+    # Read existing HTML
+    with open(output_path, "r", encoding="utf-8") as f:
+        html = f.read()
+
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Update Time
+    html = re.sub(r'(LAST SYNC: ).*?( UTC)', rf'\g<1>{generated_at}\g<2>', html)
+
+    # Update Live Visualizer Metrics (for script GSAP to animate to)
+    # GSAP lines in script: gsap.to("#val-temp", { textContent: 28, ...
+    temp_val = int(global_metrics.get("current_temp_avg", 0))
+    hum_val = int(global_metrics.get("current_hum_avg", 0))
+    wind_val = int(global_metrics.get("max_wind", 0))
+    aqi_val = int(global_metrics.get("max_uvi", 0)) # Using UVI as proxy for AQI visually here
+    
+    html = re.sub(r'(gsap\.to\("#val-temp",\s*\{\s*textContent:\s*)\d+', rf'\g<1>{temp_val}', html)
+    html = re.sub(r'(gsap\.to\("#val-hum",\s*\{\s*textContent:\s*)\d+', rf'\g<1>{hum_val}', html)
+    html = re.sub(r'(gsap\.to\("#val-wind",\s*\{\s*textContent:\s*)\d+', rf'\g<1>{wind_val}', html)
+    html = re.sub(r'(gsap\.to\("#val-aqi",\s*\{\s*textContent:\s*)\d+', rf'\g<1>{aqi_val}', html)
+
+    # Update Risk Counter GSAP
+    html = re.sub(r'(gsap\.to\("#risk-counter",\s*\{\s*textContent:\s*)\d+', rf'\g<1>{risk_score}', html)
+    
+    # Update Risk Circle Gradient
+    html = re.sub(r'(conic-gradient\(var\(--danger\) 0%, var\(--danger\) )\d+(%, #1e293b )\d+(%,\s*#1e293b 100%\))', rf'\g<1>{risk_score}\g<2>{risk_score}\g<3>', html)
+
+    # Update Risk Details using predictable structure matching
+    html = re.sub(r'(<div style="font-weight: 700; color:\s*)[^;]+(; font-size: 18px;">)[^<]+(</div>)', rf'\g<1>{risk_color}\g<2>{risk_label}\g<3>', html)
+    html = re.sub(r'(<div class="risk-reason">)[^<]+(</div>)', rf'\g<1>{risk_reason}\g<2>', html)
+
+    # Update AI Briefing
+    html = re.sub(r'(<p class="briefing" style="margin-top: 16px;">)[^<]+(</p>)', rf'\g<1>{ai_briefing}\g<2>', html)
+
+    # Update Active Alerts HTML - This is trickier because it's a multiline block.
+    # We will look for <h3 style="margin-bottom: 16px;">Active Alerts Center</h3> and replace everything after it until the closing div.
+    html = re.sub(
+        r'(<h3 style="margin-bottom: 16px;">Active Alerts Center</h3>\s*).*?(?=\s*</div>\s*</div>\s*</div>)', 
+        rf'\g<1>{alerts_html}', 
+        html, 
+        flags=re.DOTALL
     )
+
+    # Update zonePoints array
+    zone_points_json = json.dumps(zone_points, ensure_ascii=False)
+    html = re.sub(r'(var zonePoints = ).*?(;)', rf'\g<1>{zone_points_json}\g<2>', html)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -375,6 +416,11 @@ def render_report(zone_configs, current_alerts, output_path=OUTPUT_PATH):
 if __name__ == "__main__":
     import weather_alert_check as wac
     zone_configs = wac.load_zones()
-    alerts = wac.collect_alerts_across_zones(owm_api_key="unused-in-mock")
-    path = render_report(zone_configs, alerts)
-    print(f"Mission Control UI generated at {path}")
+    alerts, _ = wac.collect_alerts_across_zones(owm_api_key="unused-in-mock")
+    # mock metrics
+    metrics = {
+        "max_pop": 0.85, "max_wind": 16.5, "max_uvi": 8, "max_temp": 32,
+        "current_temp_avg": 29.5, "current_hum_avg": 42.0, "zones_count": 10
+    }
+    path = render_report(zone_configs, alerts, metrics)
+    print(f"Mission Control UI updated at {path}")

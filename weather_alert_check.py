@@ -52,9 +52,22 @@ def collect_alerts_across_zones(owm_api_key):
     """
     Loops over all zones and merges alerts based on alert_id.
     Also extracts probability metrics (like max pop in the next 24 hours).
-    Returns: dict mapping alert_id -> {event, description, start, end, zones: [...], max_pop: float}
+    Evaluates a Predictive Risk Engine.
+    Returns: (merged_alerts_dict, global_metrics_dict)
     """
     merged = {}
+    global_metrics = {
+        "max_pop": 0.0,
+        "max_wind": 0.0,
+        "max_uvi": 0.0,
+        "max_temp": -99.0,
+        "current_temp_avg": 0.0,
+        "current_hum_avg": 0.0,
+        "zones_count": 0
+    }
+
+    total_temp = 0
+    total_hum = 0
 
     for zone in load_zones():
         # Live data enforced, mock mode removed
@@ -62,13 +75,28 @@ def collect_alerts_across_zones(owm_api_key):
         
         raw_alerts = payload.get("alerts", [])
         hourly_data = payload.get("hourly", [])
+        current_data = payload.get("current", {})
+        
+        # Track current metrics
+        temp = current_data.get("temp", 0)
+        hum = current_data.get("humidity", 0)
+        wind = current_data.get("wind_speed", 0)
+        uvi = current_data.get("uvi", 0)
+        
+        total_temp += temp
+        total_hum += hum
+        global_metrics["zones_count"] += 1
+        global_metrics["max_wind"] = max(global_metrics["max_wind"], wind)
+        global_metrics["max_uvi"] = max(global_metrics["max_uvi"], uvi)
+        global_metrics["max_temp"] = max(global_metrics["max_temp"], temp)
         
         # Calculate maximum probability of precipitation (pop) in the next 24 hours
-        # OWM pop is between 0 and 1
         max_pop = 0.0
         if hourly_data:
             next_24_hours = hourly_data[:24]
             max_pop = max((hour.get("pop", 0) for hour in next_24_hours), default=0.0)
+            
+        global_metrics["max_pop"] = max(global_metrics["max_pop"], max_pop)
             
         for alert in raw_alerts:
             aid = alert_id_for(alert)
@@ -84,11 +112,36 @@ def collect_alerts_across_zones(owm_api_key):
                 }
             if zone["zone"] not in merged[aid]["zones"]:
                 merged[aid]["zones"].append(zone["zone"])
-            # Update max_pop if this zone has a higher probability
             if max_pop > merged[aid]["max_pop"]:
                 merged[aid]["max_pop"] = max_pop
 
-    return merged
+    if global_metrics["zones_count"] > 0:
+        global_metrics["current_temp_avg"] = total_temp / global_metrics["zones_count"]
+        global_metrics["current_hum_avg"] = total_hum / global_metrics["zones_count"]
+
+    # Predictive Risk Engine: If no official alerts exist but risk is high, generate a predictive alert
+    if not merged:
+        if global_metrics["max_wind"] > 15 or global_metrics["max_pop"] > 0.70:
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            synthetic_alert = {
+                "event": "Predictive Warning",
+                "start": now_ts,
+                "end": now_ts + (4 * 3600),
+                "description": f"Predictive Engine detected high risk conditions: Wind {global_metrics['max_wind']}m/s, Precipitation Prob {global_metrics['max_pop']*100}%. Exercise caution.",
+                "max_pop": global_metrics["max_pop"]
+            }
+            aid = alert_id_for(synthetic_alert)
+            merged[aid] = {
+                "alert_id": aid,
+                "event": synthetic_alert["event"],
+                "description": synthetic_alert["description"],
+                "start": synthetic_alert["start"],
+                "end": synthetic_alert["end"],
+                "zones": ["All Mashhad Zones"],
+                "max_pop": synthetic_alert["max_pop"]
+            }
+
+    return merged, global_metrics
 
 
 def now_iso():
@@ -227,10 +280,27 @@ def process_subscriber(subscriber, current_alerts, telegram_token, groq_api_key,
         log(f"[{chat_id}] Resend #{active['resend_count']} for: {active['event']}")
 
 
+def send_daily_brief(telegram_token, chat_id, metrics):
+    """
+    Sends a daily 'Clear Skies' brief to confirm the pipeline is operational.
+    """
+    message = (
+        "✅ <b>System Operational - Clear Skies</b>\n\n"
+        "No official or predictive severe weather alerts are currently active in Mashhad.\n\n"
+        f"🌡 Avg Temp: {metrics.get('current_temp_avg', 0):.1f}°C\n"
+        f"💧 Avg Humidity: {metrics.get('current_hum_avg', 0):.1f}%\n"
+        f"💨 Max Wind: {metrics.get('max_wind', 0)}m/s\n"
+        f"🌧 Max Precipitation Prob: {int(metrics.get('max_pop', 0)*100)}%\n\n"
+        "<i>Urban Weather Intelligence Bot</i>"
+    )
+    telegram_client.send_message(telegram_token, chat_id, message)
+
+
 def main():
     telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     owm_api_key = os.environ.get("OWM_API_KEY", "")
     groq_api_key = os.environ.get("GROQ_API_KEY")
+    authorized_user_id = os.environ.get("AUTHORIZED_USER_ID")
 
     def log(msg):
         print(msg, file=sys.stderr)
@@ -238,19 +308,44 @@ def main():
     if not telegram_token or not groq_api_key or not owm_api_key:
         log("Missing required API keys. Exiting.")
         sys.exit(1)
+        
+    if not authorized_user_id:
+        log("Missing AUTHORIZED_USER_ID. Exiting for security.")
+        sys.exit(1)
 
-    current_alerts = collect_alerts_across_zones(owm_api_key)
+    current_alerts, global_metrics = collect_alerts_across_zones(owm_api_key)
     log(f"Unique active alerts count: {len(current_alerts)}")
 
     current_state = state_module.load_state()
+    last_daily_brief = current_state.get("last_daily_brief")
 
+    # Authorize & process
     for chat_id, subscriber in current_state["subscribers"].items():
+        if str(chat_id) != str(authorized_user_id):
+            log(f"Unauthorized chat_id skipped: {chat_id}")
+            continue
+            
         process_subscriber(subscriber, current_alerts, telegram_token, groq_api_key, chat_id, log)
+
+    # Clear Skies Brief logic
+    if not current_alerts and global_metrics["max_wind"] <= 15 and global_metrics["max_pop"] <= 0.70:
+        should_send = False
+        if not last_daily_brief:
+            should_send = True
+        else:
+            last_brief_dt = datetime.fromisoformat(last_daily_brief)
+            if (datetime.now(timezone.utc) - last_brief_dt).total_seconds() > 24 * 3600:
+                should_send = True
+                
+        if should_send:
+            log(f"Sending daily brief to {authorized_user_id}")
+            send_daily_brief(telegram_token, authorized_user_id, global_metrics)
+            current_state["last_daily_brief"] = now_iso()
 
     state_module.save_state(current_state)
 
-    report_path = visualize_alert.render_report(load_zones(), current_alerts)
-    log(f"Visual report generated at {report_path}")
+    report_path = visualize_alert.render_report(load_zones(), current_alerts, global_metrics)
+    log(f"Visual report updated at {report_path}")
 
 
 if __name__ == "__main__":

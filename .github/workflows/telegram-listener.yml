@@ -24,6 +24,7 @@ jobs:
       - name: Run telegram listener
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          AUTHORIZED_USER_ID: ${{ secrets.AUTHORIZED_USER_ID }}
         run: python telegram_listener.py
 
       - name: Commit updated state

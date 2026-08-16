@@ -18,13 +18,17 @@ import telegram_client
 PHONE_PATTERN = re.compile(r"^/setphone\s+(\+?\d{10,14})$")
 
 
-def handle_update(update, current_state, log):
+def handle_update(update, current_state, log, authorized_user_id):
     # Handle callback queries from InlineKeyboardMarkup
     if "callback_query" in update:
         callback = update["callback_query"]
         chat_id = callback["message"]["chat"]["id"]
         data = callback.get("data", "")
         
+        if str(chat_id) != str(authorized_user_id):
+            log(f"[{chat_id}] Unauthorized callback dropped")
+            return
+            
         subscriber = state_module.get_subscriber(current_state, chat_id)
         active = subscriber.get("active_alert")
         
@@ -40,6 +44,11 @@ def handle_update(update, current_state, log):
 
     chat_id = message["chat"]["id"]
     text = message["text"].strip()
+    
+    if str(chat_id) != str(authorized_user_id):
+        log(f"[{chat_id}] Unauthorized message dropped")
+        return
+        
     subscriber = state_module.get_subscriber(current_state, chat_id)
 
     phone_match = PHONE_PATTERN.match(text)
@@ -58,16 +67,21 @@ def handle_update(update, current_state, log):
 
 
 def main():
-    telegram_token = os.environ["TELEGRAM_BOT_TOKEN"]
+    telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    authorized_user_id = os.environ.get("AUTHORIZED_USER_ID")
 
     def log(msg):
         print(msg, file=sys.stderr)
+
+    if not telegram_token or not authorized_user_id:
+        log("Missing required credentials. Exiting.")
+        sys.exit(1)
 
     current_state = state_module.load_state()
     updates = telegram_client.get_updates(telegram_token, offset=current_state["offset"] + 1)
 
     for update in updates:
-        handle_update(update, current_state, log)
+        handle_update(update, current_state, log, authorized_user_id)
         current_state["offset"] = max(current_state["offset"], update["update_id"])
 
     state_module.save_state(current_state)

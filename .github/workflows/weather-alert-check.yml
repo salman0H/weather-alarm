@@ -31,6 +31,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OWM_API_KEY: ${{ secrets.OWM_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          AUTHORIZED_USER_ID: ${{ secrets.AUTHORIZED_USER_ID }}
           MOCK_ALERT: ${{ github.event.inputs.mock || 'false' }}
         run: python weather_alert_check.py
 

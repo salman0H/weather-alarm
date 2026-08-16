@@ -23,7 +23,7 @@ def fetch_weather_data_for_zone(lat, lon, api_key, timeout=10):
         "lat": lat,
         "lon": lon,
         "appid": api_key,
-        "exclude": "current,minutely",
+        "exclude": "minutely",
         "lang": "fa"
     }
     url = f"{OWM_BASE_URL}?{urllib.parse.urlencode(params)}"
