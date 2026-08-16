@@ -7,6 +7,7 @@ Validates the complete subscriber state machine without requiring real API keys:
     3. Immediate re-check: RESEND_INTERVAL not elapsed; no second dispatch.
     4. Simulate /ok acknowledgment: state transitions to ACKED.
     5. Post-ACKED check: same alert already ACKED; no re-dispatch.
+    6. CLEAR_SKIES check: triggers the daily brief via LLM instead of alerts.
 
 Run:
     TEST_MODE=true AUTHORIZED_USER_ID=999 \\
@@ -24,67 +25,94 @@ os.environ["TEST_MODE"] = "true"  # Activate fixture loading in weather_client.p
 
 import weather_alert_check as wac   # noqa: E402
 import state as state_module         # noqa: E402
+import telegram_client               # noqa: E402
+import groq_client                   # noqa: E402
 
-SENT_MESSAGES = []
+SENT_ALERTS = []
+SENT_BRIEFS = []
 
 
 def fake_send_alert(telegram_token, groq_api_key, chat_id, alert, phone_number=None):
-    """
-    Monkeypatch replacement for wac.send_alert.
-    Records dispatches without making real Groq or Telegram API calls.
-    """
-    SENT_MESSAGES.append((chat_id, alert["event"]))
-    return f"[mock message for {alert['event']}]"
+    """Monkeypatch replacement for wac.send_alert_dispatch"""
+    SENT_ALERTS.append((chat_id, alert["event"]))
+    return f"[mock alert message for {alert['event']}]"
+
+
+def fake_send_message(telegram_token, chat_id, message, reply_markup=None):
+    """Monkeypatch replacement for telegram_client.send_message (used by brief)"""
+    SENT_BRIEFS.append(message)
+    return "[mock brief message]"
+
+
+def fake_generate_daily_brief(api_key, analytics_json, timeout=15):
+    """Monkeypatch replacement for groq_client.generate_daily_brief"""
+    return "Mocked Persian AI Brief"
 
 
 def run():
     """
-    Executes the four-phase state machine test and asserts correctness at each step.
+    Executes the state machine test and asserts correctness at each step.
     Raises AssertionError with a descriptive message if any phase fails.
     """
     # Monkeypatch to prevent network calls
-    wac.send_alert = fake_send_alert
+    wac.send_alert_dispatch = fake_send_alert
+    telegram_client.send_message = fake_send_message
+    groq_client.generate_daily_brief = fake_generate_daily_brief
 
     fresh_state = {
         "offset": 0,
         "subscribers": {"999": {"phone_number": None, "active_alert": None}},
     }
 
-    # collect_alerts_across_zones now returns a 2-tuple: (merged_alerts, global_metrics)
-    current_alerts, metrics = wac.collect_alerts_across_zones(owm_api_key="unused-in-test-mode")
+    current_alerts, metrics, hourly_data, tz_offset = wac.collect_alerts_across_zones(owm_api_key="unused")
     assert len(current_alerts) >= 1, (
         f"Expected at least one alert from fixture; got {len(current_alerts)}. "
         "Check tests/fixtures/sample_alert.json."
     )
-    print(f"[Test] Loaded {len(current_alerts)} alert(s). Metrics: {metrics}")
-
-    subscriber = fresh_state["subscribers"]["999"]
+    print(f"[Test] Loaded {len(current_alerts)} alert(s). Metrics: MaxPop={metrics['max_pop']} MaxWind={metrics['max_wind']}")
 
     # Phase 1: First check — initial dispatch expected
-    wac.process_subscriber(subscriber, current_alerts, "tok", "key", "999", print)
-    assert subscriber["active_alert"]["status"] == "PENDING_ACK", (
+    wac.route_and_dispatch(fresh_state, "999", current_alerts, metrics, hourly_data, tz_offset, "tok", "key", print)
+    assert fresh_state["subscribers"]["999"]["active_alert"]["status"] == "PENDING_ACK", (
         "After first check, subscriber status must be PENDING_ACK."
     )
-    assert len(SENT_MESSAGES) == 1, "Exactly one message must be dispatched on first check."
-    print("PASS Phase 1: Initial dispatch succeeded.")
+    assert len(SENT_ALERTS) == 1, "Exactly one alert message must be dispatched on first check."
+    print("PASS Phase 1: Initial alert dispatch succeeded.")
 
     # Phase 2: Immediate re-check — resend interval not elapsed; no dispatch
-    wac.process_subscriber(subscriber, current_alerts, "tok", "key", "999", print)
-    assert len(SENT_MESSAGES) == 1, (
+    wac.route_and_dispatch(fresh_state, "999", current_alerts, metrics, hourly_data, tz_offset, "tok", "key", print)
+    assert len(SENT_ALERTS) == 1, (
         "No resend should occur before RESEND_INTERVAL_MINUTES has elapsed."
     )
-    print("PASS Phase 2: No premature resend.")
+    print("PASS Phase 2: No premature alert resend.")
 
     # Phase 3: Simulate /ok acknowledgment
-    subscriber["active_alert"]["status"] = "ACKED"
+    fresh_state["subscribers"]["999"]["active_alert"]["status"] = "ACKED"
     print("PASS Phase 3: Acknowledgment simulated (/ok).")
 
     # Phase 4: Post-ACKED check — same alert still present but ACKED; no re-dispatch
-    wac.process_subscriber(subscriber, current_alerts, "tok", "key", "999", print)
-    assert len(SENT_MESSAGES) == 1, (
+    wac.route_and_dispatch(fresh_state, "999", current_alerts, metrics, hourly_data, tz_offset, "tok", "key", print)
+    assert len(SENT_ALERTS) == 1, (
         "After ACKED, the same alert must not be re-dispatched."
     )
     print("PASS Phase 4: No re-dispatch after acknowledgment.")
+
+    # Phase 5: CLEAR_SKIES transition
+    print("\n--- Testing CLEAR_SKIES Route ---")
+    SENT_ALERTS.clear()
+    SENT_BRIEFS.clear()
+    
+    # Simulate calm conditions with no alerts
+    metrics["max_wind"] = 10.0
+    metrics["max_pop"] = 0.50
+    
+    wac.route_and_dispatch(fresh_state, "999", {}, metrics, hourly_data, tz_offset, "tok", "key", print)
+    assert len(SENT_ALERTS) == 0, "No alerts should be sent in CLEAR_SKIES."
+    assert len(SENT_BRIEFS) == 1, "Exactly one daily brief should be dispatched."
+    assert fresh_state["subscribers"]["999"]["active_alert"]["status"] == "EXPIRED", (
+        "Previous active alert should be marked EXPIRED upon clearing."
+    )
+    print("PASS Phase 5: CLEAR_SKIES path correctly routed to daily brief.")
 
     print("\nAll pipeline tests passed successfully.")
 

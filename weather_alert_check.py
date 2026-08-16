@@ -3,20 +3,21 @@ Entry point Workflow A: weather-alert-check.yml
 
 Execution steps:
   1. Load config/zones.json
-  2. For each zone, fetch alerts from OpenWeatherMap (or mock in tests)
-  3. Dedupe and merge identical alerts across different zones
-  4. For each subscriber in state.json:
-       - If no active_alert and a new alert exists -> initial send
-       - If active_alert exists, is still in the current list, is PENDING_ACK,
-         and RESEND_INTERVAL_MINUTES has passed -> resend
-       - If active_alert exists but is no longer in the current list -> EXPIRED
-  5. Save state.json (commit is handled by the next step of the workflow)
+  2. Data Collection (Fetch from OWM or Mock)
+  3. Analysis & State Machine Routing
+     - ALERT: active official alerts
+     - PREDICTIVE_WARNING: no alerts, but high risk thresholds
+     - CLEAR_SKIES: calm conditions
+  4. Generate and Dispatch message via Telegram
+  5. Save state.json and update HTML dashboard
 """
 
 import hashlib
+import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from enum import Enum
 
 import groq_client
 import severity
@@ -31,30 +32,79 @@ MOCK_FIXTURE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "tests", "fixtures", "sample_alert.json"
 )
 
+ZONE_PROFILES = {
+    "مرکز شهر": "Central urban area, high heat retention, dense traffic.",
+    "وکیل‌آباد": "Western district, higher elevation, more prone to strong winds.",
+    "طرق": "Southern outskirts, open terrain, faster temperature drops at night.",
+    "قاسم‌آباد": "North-western residential zone, moderate exposure.",
+    "الهیه / طلاب": "Eastern residential zone, mixed density.",
+    "شهرک صنعتی توس": "Industrial zone in the northwest, high pollution potential.",
+    "حرم مطهر": "Central religious hub, extremely high foot traffic.",
+    "کوهسنگی": "South-western park area near mountains, localized cooling.",
+    "هاشمیه": "South-western affluent area, elevated terrain.",
+    "احمدآباد": "Central-west commercial hub."
+}
+
+class PipelineState(Enum):
+    ALERT = 1
+    PREDICTIVE_WARNING = 2
+    CLEAR_SKIES = 3
 
 def load_zones():
-    import json
     with open(ZONES_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
 def alert_id_for(alert):
-    """
-    Unique key for each alert: MD5 hash of event + start.
-    This key is used for deduplication across zones and to detect
-    whether an alert is the "same as before" or a fresh one.
-    """
     raw = f"{alert.get('event')}|{alert.get('start')}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
+def compute_day_part_analytics(hourly_data, timezone_offset_secs):
+    """
+    Buckets hourly slots into Morning (06-12), Afternoon (12-18), and Evening (18-24).
+    Uses local time (UTC + offset).
+    """
+    buckets = {
+        "Morning": {"temps": [], "pops": [], "winds": [], "uvis": []},
+        "Afternoon": {"temps": [], "pops": [], "winds": [], "uvis": []},
+        "Evening": {"temps": [], "pops": [], "winds": [], "uvis": []}
+    }
+    
+    for hour in hourly_data[:24]:
+        dt = datetime.fromtimestamp(hour.get("dt", 0) + timezone_offset_secs, tz=timezone.utc)
+        hour_num = dt.hour
+        
+        bucket = None
+        if 6 <= hour_num < 12:
+            bucket = "Morning"
+        elif 12 <= hour_num < 18:
+            bucket = "Afternoon"
+        elif 18 <= hour_num <= 23:
+            bucket = "Evening"
+            
+        if bucket:
+            buckets[bucket]["temps"].append(hour.get("temp", 0))
+            buckets[bucket]["pops"].append(hour.get("pop", 0) * 100)
+            buckets[bucket]["winds"].append(hour.get("wind_speed", 0))
+            buckets[bucket]["uvis"].append(hour.get("uvi", 0))
+            
+    analytics = {}
+    for name, data in buckets.items():
+        if data["temps"]:
+            analytics[name] = {
+                "avg_temp": round(sum(data["temps"]) / len(data["temps"]), 1),
+                "peak_temp": round(max(data["temps"]), 1),
+                "avg_pop": round(sum(data["pops"]) / len(data["pops"]), 1),
+                "peak_pop": round(max(data["pops"]), 1),
+                "avg_wind": round(sum(data["winds"]) / len(data["winds"]), 1),
+                "peak_wind": round(max(data["winds"]), 1),
+                "avg_uvi": round(sum(data["uvis"]) / len(data["uvis"]), 1)
+            }
+        else:
+            analytics[name] = None
+    
+    return analytics
 
 def collect_alerts_across_zones(owm_api_key):
-    """
-    Loops over all zones and merges alerts based on alert_id.
-    Also extracts probability metrics (like max pop in the next 24 hours).
-    Evaluates a Predictive Risk Engine.
-    Returns: (merged_alerts_dict, global_metrics_dict)
-    """
     merged = {}
     global_metrics = {
         "max_pop": 0.0,
@@ -65,19 +115,25 @@ def collect_alerts_across_zones(owm_api_key):
         "current_hum_avg": 0.0,
         "zones_count": 0
     }
-
+    
     total_temp = 0
     total_hum = 0
+    all_hourly_data = []
+    tz_offset = 0
 
     for zone in load_zones():
-        # Live data enforced, mock mode removed
         payload = weather_client.fetch_weather_data_for_zone(zone["lat"], zone["lon"], owm_api_key)
         
+        if not tz_offset:
+            tz_offset = payload.get("timezone_offset", 12600)
+            
         raw_alerts = payload.get("alerts", [])
         hourly_data = payload.get("hourly", [])
+        if not all_hourly_data and hourly_data:
+            all_hourly_data = hourly_data
+            
         current_data = payload.get("current", {})
         
-        # Track current metrics
         temp = current_data.get("temp", 0)
         hum = current_data.get("humidity", 0)
         wind = current_data.get("wind_speed", 0)
@@ -90,7 +146,6 @@ def collect_alerts_across_zones(owm_api_key):
         global_metrics["max_uvi"] = max(global_metrics["max_uvi"], uvi)
         global_metrics["max_temp"] = max(global_metrics["max_temp"], temp)
         
-        # Calculate maximum probability of precipitation (pop) in the next 24 hours
         max_pop = 0.0
         if hourly_data:
             next_24_hours = hourly_data[:24]
@@ -119,39 +174,14 @@ def collect_alerts_across_zones(owm_api_key):
         global_metrics["current_temp_avg"] = total_temp / global_metrics["zones_count"]
         global_metrics["current_hum_avg"] = total_hum / global_metrics["zones_count"]
 
-    # Predictive Risk Engine: If no official alerts exist but risk is high, generate a predictive alert
-    if not merged:
-        if global_metrics["max_wind"] > 15 or global_metrics["max_pop"] > 0.70:
-            now_ts = int(datetime.now(timezone.utc).timestamp())
-            synthetic_alert = {
-                "event": "Predictive Warning",
-                "start": now_ts,
-                "end": now_ts + (4 * 3600),
-                "description": f"Predictive Engine detected high risk conditions: Wind {global_metrics['max_wind']}m/s, Precipitation Prob {global_metrics['max_pop']*100}%. Exercise caution.",
-                "max_pop": global_metrics["max_pop"]
-            }
-            aid = alert_id_for(synthetic_alert)
-            merged[aid] = {
-                "alert_id": aid,
-                "event": synthetic_alert["event"],
-                "description": synthetic_alert["description"],
-                "start": synthetic_alert["start"],
-                "end": synthetic_alert["end"],
-                "zones": ["All Mashhad Zones"],
-                "max_pop": synthetic_alert["max_pop"]
-            }
-
-    return merged, global_metrics
-
+    return merged, global_metrics, all_hourly_data, tz_offset
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
-
 def minutes_since(iso_timestamp):
     then = datetime.fromisoformat(iso_timestamp)
     return (datetime.now(timezone.utc) - then).total_seconds() / 60
-
 
 def zone_coords(zone_name):
     for zone in load_zones():
@@ -159,48 +189,38 @@ def zone_coords(zone_name):
             return zone["lat"], zone["lon"]
     return None
 
-
 def format_time(unix_ts):
     if not unix_ts:
         return "Unknown"
     dt = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
     return dt.strftime("%Y-%m-%d %H:%M UTC")
 
-
 def build_alert_message(level_info, level, event, summary, zones_list, start, end):
     zones_text = ", ".join(zones_list)
     tips = severity.get_safety_tips(level)
     tips_text = "\n".join(f"• {tip}" for tip in tips)
     return (
-        f"{level_info['emoji']} <b>{event}</b>\n"
-        f"Severity: {level} — {level_info['label']}\n\n"
-        f"Affected Zones: {zones_text}\n"
-        f"Start: {format_time(start)}\n"
-        f"End: {format_time(end)}\n\n"
-        f"{summary}\n\n"
-        f"<b>Safety Tips:</b>\n{tips_text}\n\n"
-        f"<i>Please acknowledge below to stop receiving this alert.</i>"
+        f"🚨 <b>WEATHER ALERT — {event}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📍 <b>Affected Zones:</b> {zones_text}\n"
+        f"⏱ <b>Active:</b> {format_time(start)} – {format_time(end)}\n"
+        f"📊 <b>Risk Level:</b> <code>{level} — {level_info['label']}</code>\n\n"
+        f"<i>{summary}</i>\n\n"
+        f"💡 <b>Safety Guidance</b>\n{tips_text}\n\n"
+        f"<i>Tap ✅ Acknowledge to dismiss.</i>"
     )
 
-
 def dispatch_sms(phone_number, message):
-    """
-    Placeholder hook for future SMS gateway integration.
-    This will be called if the subscriber has a phone number registered.
-    """
     if phone_number:
-        # TODO: Implement SMS API call here
         pass
 
-
-def send_alert(telegram_token, groq_api_key, chat_id, alert, phone_number=None):
+def send_alert_dispatch(telegram_token, groq_api_key, chat_id, alert, phone_number=None):
     level = severity.classify_severity(alert["event"])
     level_info = severity.SEVERITY_LEVELS[level]
     
-    # Calculate probability percentage
     prob_percentage = int(alert.get("max_pop", 0) * 100)
     
-    summary = groq_client.summarize_description(
+    summary = groq_client.generate_alert_message(
         api_key=groq_api_key,
         description=alert["description"],
         probability=prob_percentage
@@ -214,12 +234,10 @@ def send_alert(telegram_token, groq_api_key, chat_id, alert, phone_number=None):
     if phone_number:
         dispatch_sms(phone_number, f"Weather Alert: {alert['event']} - {level}. Check Telegram for details.")
 
-    # Send location separately to show the epicenter on the map
     coords = zone_coords(alert["zones"][0]) if alert.get("zones") else None
     if coords:
         telegram_client.send_location(telegram_token, chat_id, coords[0], coords[1])
 
-    # Inline Keyboard for acknowledgment
     reply_markup = {
         "inline_keyboard": [
             [{"text": "✅ Acknowledge", "callback_data": alert["alert_id"]}]
@@ -229,17 +247,61 @@ def send_alert(telegram_token, groq_api_key, chat_id, alert, phone_number=None):
     telegram_client.send_message(telegram_token, chat_id, message, reply_markup=reply_markup)
     return message
 
+def route_and_dispatch(current_state, authorized_user_id, current_alerts, global_metrics, hourly_data, tz_offset, telegram_token, groq_api_key, log):
+    """
+    Guarantees a single Telegram dispatch based on strict State Machine routing.
+    """
+    state_enum = PipelineState.CLEAR_SKIES
+    
+    # Analysis & State determination
+    if current_alerts:
+        state_enum = PipelineState.ALERT
+    elif global_metrics["max_wind"] > 15 or global_metrics["max_pop"] > 0.70:
+        state_enum = PipelineState.PREDICTIVE_WARNING
 
-def process_subscriber(subscriber, current_alerts, telegram_token, groq_api_key, chat_id, log):
-    active = subscriber.get("active_alert")
+    subscriber = state_module.get_subscriber(current_state, authorized_user_id)
     phone_number = subscriber.get("phone_number")
+    active = subscriber.get("active_alert")
 
-    if active is None:
-        # No active alert -> if there's a new alert, send for the first time
-        if current_alerts:
-            # Simplification: If multiple alerts exist, prioritize the first one.
-            first_alert = next(iter(current_alerts.values()))
-            send_alert(telegram_token, groq_api_key, chat_id, first_alert, phone_number)
+    if state_enum in (PipelineState.ALERT, PipelineState.PREDICTIVE_WARNING):
+        # We handle predictive warning as an alert payload
+        if state_enum == PipelineState.PREDICTIVE_WARNING:
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            alert_payload = {
+                "event": "Predictive Warning",
+                "start": now_ts,
+                "end": now_ts + (4 * 3600),
+                "description": f"Predictive Engine detected high risk conditions: Wind {global_metrics['max_wind']}m/s, Precipitation Prob {global_metrics['max_pop']*100}%.",
+                "max_pop": global_metrics["max_pop"],
+                "zones": ["All Mashhad Zones"]
+            }
+            alert_payload["alert_id"] = alert_id_for(alert_payload)
+            current_alerts = {alert_payload["alert_id"]: alert_payload}
+
+        first_alert = next(iter(current_alerts.values()))
+
+        should_send_new = False
+        
+        if active is None:
+            should_send_new = True
+        elif active["status"] == "PENDING_ACK":
+            if active["alert_id"] not in current_alerts:
+                active["status"] = "EXPIRED"
+                log(f"[{authorized_user_id}] Alert expired: {active['event']}")
+                should_send_new = True
+            else:
+                # Existing active alert
+                if minutes_since(active["last_sent_at"]) >= RESEND_INTERVAL_MINUTES:
+                    send_alert_dispatch(telegram_token, groq_api_key, authorized_user_id, active, phone_number)
+                    active["last_sent_at"] = now_iso()
+                    active["resend_count"] += 1
+                    log(f"[{authorized_user_id}] Resend #{active['resend_count']} for: {active['event']}")
+        else: # ACKED or EXPIRED
+            if first_alert["alert_id"] != active.get("alert_id"):
+                should_send_new = True
+
+        if should_send_new:
+            send_alert_dispatch(telegram_token, groq_api_key, authorized_user_id, first_alert, phone_number)
             subscriber["active_alert"] = {
                 **first_alert,
                 "first_sent_at": now_iso(),
@@ -247,79 +309,26 @@ def process_subscriber(subscriber, current_alerts, telegram_token, groq_api_key,
                 "resend_count": 0,
                 "status": "PENDING_ACK"
             }
-            log(f"[{chat_id}] New alert sent: {first_alert['event']}")
-        return
-
-    # Subscriber already has an active_alert
-    if active["status"] != "PENDING_ACK":
-        # ACKED or EXPIRED -> If another alert is active, start a new cycle
-        if active["alert_id"] not in current_alerts and current_alerts:
-            first_alert = next(iter(current_alerts.values()))
-            send_alert(telegram_token, groq_api_key, chat_id, first_alert, phone_number)
-            subscriber["active_alert"] = {
-                **first_alert,
-                "first_sent_at": now_iso(),
-                "last_sent_at": now_iso(),
-                "resend_count": 0,
-                "status": "PENDING_ACK"
-            }
-            log(f"[{chat_id}] New alert (next cycle) sent: {first_alert['event']}")
-        return
-
-    # status == PENDING_ACK
-    if active["alert_id"] not in current_alerts:
-        # Alert is no longer present in official source -> stop resending
-        active["status"] = "EXPIRED"
-        log(f"[{chat_id}] Alert expired: {active['event']}")
-        return
-
-    if minutes_since(active["last_sent_at"]) >= RESEND_INTERVAL_MINUTES:
-        send_alert(telegram_token, groq_api_key, chat_id, active, phone_number)
-        active["last_sent_at"] = now_iso()
-        active["resend_count"] += 1
-        log(f"[{chat_id}] Resend #{active['resend_count']} for: {active['event']}")
-
-
-def send_daily_brief(telegram_token, chat_id, metrics):
-    """
-    Sends a daily 'Clear Skies' operational brief to the authorized Telegram user.
-
-    Dispatched at most once every 24 hours when no alerts are active and the
-    predictive risk thresholds are not breached. Ensures the subscriber always
-    knows the pipeline is running, even during calm weather periods.
-
-    Args:
-        telegram_token (str): Telegram Bot API token.
-        chat_id (str): Telegram chat ID of the authorized user.
-        metrics (dict): Global aggregated metrics from collect_alerts_across_zones.
-    """
-    message = (
-        "✅ <b>System Operational — Clear Skies</b>\n\n"
-        "No official or predictive severe weather alerts are currently active in Mashhad.\n\n"
-        f"🌡 Avg Temp: {metrics.get('current_temp_avg', 0):.1f}°C\n"
-        f"💧 Avg Humidity: {metrics.get('current_hum_avg', 0):.1f}%\n"
-        f"💨 Max Wind: {metrics.get('max_wind', 0):.1f} m/s\n"
-        f"🌧 Max Precipitation Probability: {int(metrics.get('max_pop', 0) * 100)}%\n\n"
-        "<i>Urban Weather Intelligence Bot — Mashhad</i>"
-    )
-    telegram_client.send_message(telegram_token, chat_id, message)
+            log(f"[{authorized_user_id}] New alert sent: {first_alert['event']}")
+    
+    else:  # CLEAR_SKIES
+        if active and active["status"] != "EXPIRED":
+             active["status"] = "EXPIRED"
+             
+        day_part_analytics = compute_day_part_analytics(hourly_data, tz_offset)
+        
+        prompt_data = {
+            "analytics": day_part_analytics,
+            "zone_context": ZONE_PROFILES
+        }
+        
+        summary = groq_client.generate_daily_brief(groq_api_key, json.dumps(prompt_data, ensure_ascii=False))
+        
+        telegram_client.send_message(telegram_token, authorized_user_id, summary)
+        log(f"[{authorized_user_id}] Clear Skies daily brief dispatched via LLM.")
 
 
 def main():
-    """
-    Pipeline entry point.
-
-    Execution sequence:
-        1. Load environment credentials.
-        2. In TEST_MODE: relax API-key guards and force-register the authorized
-           user as a subscriber so the full pipeline (fetch -> risk engine ->
-           Groq -> Telegram -> HTML) executes end-to-end without live API keys.
-        3. Collect live alerts + global metrics across all Mashhad zones.
-        4. For each authorized subscriber, evaluate and dispatch alerts.
-        5. Dispatch a Clear Skies operational brief if conditions are calm and
-           at least 24 hours have elapsed since the last brief.
-        6. Persist state.json and overwrite the HTML dashboard.
-    """
     telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     owm_api_key = os.environ.get("OWM_API_KEY", "")
     groq_api_key = os.environ.get("GROQ_API_KEY")
@@ -347,8 +356,8 @@ def main():
         log("[Pipeline] ERROR — TELEGRAM_BOT_TOKEN is not set. Exiting.")
         sys.exit(1)
 
-    # collect_alerts_across_zones returns (merged_alerts_dict, global_metrics_dict)
-    current_alerts, global_metrics = collect_alerts_across_zones(owm_api_key)
+    # 1. Data Collection & Extraction
+    current_alerts, global_metrics, hourly_data, tz_offset = collect_alerts_across_zones(owm_api_key)
     log(
         f"[Pipeline] Active alerts: {len(current_alerts)} | "
         f"MaxWind={global_metrics['max_wind']:.1f}m/s "
@@ -357,46 +366,18 @@ def main():
     )
 
     current_state = state_module.load_state()
-    last_daily_brief = current_state.get("last_daily_brief")
 
-    if test_mode:
-        # Force-register the authorized user so the dispatch path executes
-        # even on a clean state.json with no existing subscribers.
-        test_subscriber = state_module.get_subscriber(current_state, authorized_user_id)
-        process_subscriber(
-            test_subscriber, current_alerts, telegram_token, groq_api_key, authorized_user_id, log
-        )
-    else:
-        for chat_id, subscriber in current_state["subscribers"].items():
-            if str(chat_id) != str(authorized_user_id):
-                log(f"[Auth] Unauthorized chat_id skipped: {chat_id}")
-                continue
-            process_subscriber(
-                subscriber, current_alerts, telegram_token, groq_api_key, chat_id, log
-            )
-
-    # Clear Skies brief: once per 24 h when conditions are calm
-    if (
-        not current_alerts
-        and global_metrics["max_wind"] <= 15
-        and global_metrics["max_pop"] <= 0.70
-    ):
-        should_send = not last_daily_brief
-        if last_daily_brief:
-            last_brief_dt = datetime.fromisoformat(last_daily_brief)
-            if (datetime.now(timezone.utc) - last_brief_dt).total_seconds() > 24 * 3600:
-                should_send = True
-
-        if should_send:
-            log(f"[Brief] Dispatching Clear Skies brief to {authorized_user_id}")
-            send_daily_brief(telegram_token, authorized_user_id, global_metrics)
-            current_state["last_daily_brief"] = now_iso()
+    # 2. State Machine Routing & Dispatch
+    route_and_dispatch(
+        current_state, authorized_user_id, current_alerts, global_metrics, 
+        hourly_data, tz_offset, telegram_token, groq_api_key, log
+    )
 
     state_module.save_state(current_state)
 
+    # 3. HTML Update
     report_path = visualize_alert.render_report(load_zones(), current_alerts, global_metrics)
     log(f"[Pipeline] HTML dashboard updated at {report_path}")
-
 
 if __name__ == "__main__":
     main()
