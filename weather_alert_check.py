@@ -280,27 +280,10 @@ def process_subscriber(subscriber, current_alerts, telegram_token, groq_api_key,
         log(f"[{chat_id}] Resend #{active['resend_count']} for: {active['event']}")
 
 
-def send_daily_brief(telegram_token, chat_id, metrics):
-    """
-    Sends a daily 'Clear Skies' brief to confirm the pipeline is operational.
-    """
-    message = (
-        "✅ <b>System Operational - Clear Skies</b>\n\n"
-        "No official or predictive severe weather alerts are currently active in Mashhad.\n\n"
-        f"🌡 Avg Temp: {metrics.get('current_temp_avg', 0):.1f}°C\n"
-        f"💧 Avg Humidity: {metrics.get('current_hum_avg', 0):.1f}%\n"
-        f"💨 Max Wind: {metrics.get('max_wind', 0)}m/s\n"
-        f"🌧 Max Precipitation Prob: {int(metrics.get('max_pop', 0)*100)}%\n\n"
-        "<i>Urban Weather Intelligence Bot</i>"
-    )
-    telegram_client.send_message(telegram_token, chat_id, message)
-
-
 def main():
     telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     owm_api_key = os.environ.get("OWM_API_KEY", "")
     groq_api_key = os.environ.get("GROQ_API_KEY")
-    authorized_user_id = os.environ.get("AUTHORIZED_USER_ID")
 
     def log(msg):
         print(msg, file=sys.stderr)
@@ -308,44 +291,19 @@ def main():
     if not telegram_token or not groq_api_key or not owm_api_key:
         log("Missing required API keys. Exiting.")
         sys.exit(1)
-        
-    if not authorized_user_id:
-        log("Missing AUTHORIZED_USER_ID. Exiting for security.")
-        sys.exit(1)
 
-    current_alerts, global_metrics = collect_alerts_across_zones(owm_api_key)
+    current_alerts = collect_alerts_across_zones(owm_api_key)
     log(f"Unique active alerts count: {len(current_alerts)}")
 
     current_state = state_module.load_state()
-    last_daily_brief = current_state.get("last_daily_brief")
 
-    # Authorize & process
     for chat_id, subscriber in current_state["subscribers"].items():
-        if str(chat_id) != str(authorized_user_id):
-            log(f"Unauthorized chat_id skipped: {chat_id}")
-            continue
-            
         process_subscriber(subscriber, current_alerts, telegram_token, groq_api_key, chat_id, log)
-
-    # Clear Skies Brief logic
-    if not current_alerts and global_metrics["max_wind"] <= 15 and global_metrics["max_pop"] <= 0.70:
-        should_send = False
-        if not last_daily_brief:
-            should_send = True
-        else:
-            last_brief_dt = datetime.fromisoformat(last_daily_brief)
-            if (datetime.now(timezone.utc) - last_brief_dt).total_seconds() > 24 * 3600:
-                should_send = True
-                
-        if should_send:
-            log(f"Sending daily brief to {authorized_user_id}")
-            send_daily_brief(telegram_token, authorized_user_id, global_metrics)
-            current_state["last_daily_brief"] = now_iso()
 
     state_module.save_state(current_state)
 
-    report_path = visualize_alert.render_report(load_zones(), current_alerts, global_metrics)
-    log(f"Visual report updated at {report_path}")
+    report_path = visualize_alert.render_report(load_zones(), current_alerts)
+    log(f"Visual report generated at {report_path}")
 
 
 if __name__ == "__main__":

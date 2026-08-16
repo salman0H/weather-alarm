@@ -1,70 +1,92 @@
 """
-تست end-to-end با mock mode.
+End-to-end integration test for the alert pipeline using TEST_MODE mock fixture.
 
-این تست چرخه کامل را بدون نیاز به هشدار واقعی هواشناسی و بدون نیاز به
-کلید واقعی OpenWeatherMap بررسی می‌کند:
+Validates the complete subscriber state machine without requiring real API keys:
+    1. One unique alert is loaded from the fixture via TEST_MODE.
+    2. First check: state transitions NO_ALERT -> PENDING_ACK; message dispatched.
+    3. Immediate re-check: RESEND_INTERVAL not elapsed; no second dispatch.
+    4. Simulate /ok acknowledgment: state transitions to ACKED.
+    5. Post-ACKED check: same alert already ACKED; no re-dispatch.
 
-  ۱. یک alert از fixture خوانده می‌شود (dedupe و ساخت alert_id)
-  ۲. برای یک subscriber فرضی، وضعیت از NO_ALERT به PENDING_ACK می‌رود
-  ۳. شبیه‌سازی پیام /ok از کاربر -> وضعیت به ACKED می‌رود
-  ۴. اجرای دوباره check بعد از ACKED -> هیچ ارسال جدیدی رخ نمی‌دهد
-     (چون alert در fixture هنوز همان قبلی است)
-
-اجرا: MOCK_ALERT=true python tests/test_pipeline.py
-(کلیدهای API واقعی لازم نیستند چون send_message و generate_alert_message
- در این تست mock/monkeypatch می‌شوند تا هیچ درخواست شبکه واقعی زده نشود.)
+Run:
+    TEST_MODE=true AUTHORIZED_USER_ID=999 \\
+    TELEGRAM_BOT_TOKEN=x GROQ_API_KEY=x \\
+    python tests/test_pipeline.py
 """
 
 import os
 import sys
 
+# Ensure the project root is on sys.path when running directly from this file
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-import weather_alert_check as wac  # noqa: E402
-import state as state_module  # noqa: E402
+os.environ["TEST_MODE"] = "true"  # Activate fixture loading in weather_client.py
 
-os.environ["MOCK_ALERT"] = "true"
+import weather_alert_check as wac   # noqa: E402
+import state as state_module         # noqa: E402
 
 SENT_MESSAGES = []
 
 
-def fake_send_alert(telegram_token, groq_api_key, chat_id, alert):
-    # به‌جای فراخوانی واقعی Groq و Telegram، فقط رویداد را ثبت می‌کنیم
+def fake_send_alert(telegram_token, groq_api_key, chat_id, alert, phone_number=None):
+    """
+    Monkeypatch replacement for wac.send_alert.
+    Records dispatches without making real Groq or Telegram API calls.
+    """
     SENT_MESSAGES.append((chat_id, alert["event"]))
     return f"[mock message for {alert['event']}]"
 
 
 def run():
-    wac.send_alert = fake_send_alert  # monkeypatch برای جلوگیری از network call
+    """
+    Executes the four-phase state machine test and asserts correctness at each step.
+    Raises AssertionError with a descriptive message if any phase fails.
+    """
+    # Monkeypatch to prevent network calls
+    wac.send_alert = fake_send_alert
 
-    fresh_state = {"offset": 0, "subscribers": {"999": {"phone_number": None, "active_alert": None}}}
+    fresh_state = {
+        "offset": 0,
+        "subscribers": {"999": {"phone_number": None, "active_alert": None}},
+    }
 
-    current_alerts = wac.collect_alerts_across_zones(owm_api_key="unused-in-mock")
-    assert len(current_alerts) == 1, "باید دقیقاً یک alert یکتا از fixture خوانده شود"
+    # collect_alerts_across_zones now returns a 2-tuple: (merged_alerts, global_metrics)
+    current_alerts, metrics = wac.collect_alerts_across_zones(owm_api_key="unused-in-test-mode")
+    assert len(current_alerts) >= 1, (
+        f"Expected at least one alert from fixture; got {len(current_alerts)}. "
+        "Check tests/fixtures/sample_alert.json."
+    )
+    print(f"[Test] Loaded {len(current_alerts)} alert(s). Metrics: {metrics}")
 
     subscriber = fresh_state["subscribers"]["999"]
 
-    # مرحله ۱: اولین چک -> باید ارسال اولیه انجام شود
+    # Phase 1: First check — initial dispatch expected
     wac.process_subscriber(subscriber, current_alerts, "tok", "key", "999", print)
-    assert subscriber["active_alert"]["status"] == "PENDING_ACK"
-    assert len(SENT_MESSAGES) == 1
-    print("OK: ارسال اولیه انجام شد")
+    assert subscriber["active_alert"]["status"] == "PENDING_ACK", (
+        "After first check, subscriber status must be PENDING_ACK."
+    )
+    assert len(SENT_MESSAGES) == 1, "Exactly one message must be dispatched on first check."
+    print("PASS Phase 1: Initial dispatch succeeded.")
 
-    # مرحله ۲: چک بلافاصله بعدی -> چون هنوز به RESEND_INTERVAL نرسیده، resend نباید بشود
+    # Phase 2: Immediate re-check — resend interval not elapsed; no dispatch
     wac.process_subscriber(subscriber, current_alerts, "tok", "key", "999", print)
-    assert len(SENT_MESSAGES) == 1, "نباید قبل از رسیدن به فاصله resend، دوباره ارسال شود"
-    print("OK: resend زودهنگام رخ نداد")
+    assert len(SENT_MESSAGES) == 1, (
+        "No resend should occur before RESEND_INTERVAL_MINUTES has elapsed."
+    )
+    print("PASS Phase 2: No premature resend.")
 
-    # مرحله ۳: شبیه‌سازی /ok کاربر
+    # Phase 3: Simulate /ok acknowledgment
     subscriber["active_alert"]["status"] = "ACKED"
-    print("OK: کاربر تایید کرد (شبیه‌سازی /ok)")
+    print("PASS Phase 3: Acknowledgment simulated (/ok).")
 
-    # مرحله ۴: چک بعدی -> چون همان alert هنوز فعال است ولی وضعیت ACKED است، نباید resend شود
+    # Phase 4: Post-ACKED check — same alert still present but ACKED; no re-dispatch
     wac.process_subscriber(subscriber, current_alerts, "tok", "key", "999", print)
-    assert len(SENT_MESSAGES) == 1, "بعد از ACKED نباید همان alert دوباره ارسال شود"
-    print("OK: بعد از تایید، ارسال مجدد متوقف شد")
+    assert len(SENT_MESSAGES) == 1, (
+        "After ACKED, the same alert must not be re-dispatched."
+    )
+    print("PASS Phase 4: No re-dispatch after acknowledgment.")
 
-    print("\nهمه تست‌ها با موفقیت پاس شدند.")
+    print("\nAll pipeline tests passed successfully.")
 
 
 if __name__ == "__main__":

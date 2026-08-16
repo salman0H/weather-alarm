@@ -2,13 +2,50 @@
   "lat": 36.297,
   "lon": 59.606,
   "timezone": "Asia/Tehran",
+  "timezone_offset": 12600,
+  "current": {
+    "dt": 1755248400,
+    "sunrise": 1755209000,
+    "sunset": 1755257000,
+    "temp": 34.7,
+    "feels_like": 32.1,
+    "pressure": 1008,
+    "humidity": 28,
+    "dew_point": 15.3,
+    "uvi": 9.5,
+    "clouds": 5,
+    "visibility": 10000,
+    "wind_speed": 17.2,
+    "wind_deg": 270,
+    "weather": [{"id": 800, "main": "Clear", "description": "clear sky", "icon": "01d"}]
+  },
+  "hourly": [
+    {"dt": 1755248400, "temp": 34.7, "pop": 0.85, "wind_speed": 17.2, "uvi": 9.5, "humidity": 28},
+    {"dt": 1755252000, "temp": 35.1, "pop": 0.90, "wind_speed": 18.0, "uvi": 9.0, "humidity": 26},
+    {"dt": 1755255600, "temp": 35.8, "pop": 0.88, "wind_speed": 17.5, "uvi": 8.0, "humidity": 25},
+    {"dt": 1755259200, "temp": 34.5, "pop": 0.80, "wind_speed": 16.5, "uvi": 6.5, "humidity": 30},
+    {"dt": 1755262800, "temp": 33.0, "pop": 0.75, "wind_speed": 15.5, "uvi": 4.0, "humidity": 32},
+    {"dt": 1755266400, "temp": 31.5, "pop": 0.70, "wind_speed": 14.0, "uvi": 2.0, "humidity": 35},
+    {"dt": 1755270000, "temp": 29.8, "pop": 0.60, "wind_speed": 12.0, "uvi": 1.0, "humidity": 38}
+  ],
+  "daily": [
+    {
+      "dt": 1755220800,
+      "temp": {"day": 34.7, "min": 22.0, "max": 36.5, "night": 23.0, "eve": 31.0, "morn": 24.0},
+      "pop": 0.90,
+      "wind_speed": 18.0,
+      "uvi": 10.0,
+      "humidity": 28,
+      "weather": [{"id": 200, "main": "Thunderstorm", "description": "thunderstorm with light rain"}]
+    }
+  ],
   "alerts": [
     {
-      "sender_name": "اداره کل هواشناسی خراسان رضوی",
-      "event": "هشدار سیلاب ناگهانی",
+      "sender_name": "Khorasan Razavi Meteorological Office",
+      "event": "Flash Flood Warning",
       "start": 1755248400,
       "end": 1755262800,
-      "description": "به دلیل بارش‌های شدید در مناطق شمالی و شرقی مشهد، احتمال وقوع سیلاب ناگهانی وجود دارد. از تردد در مسیل‌ها و مناطق کم‌ارتفاع خودداری کنید.",
+      "description": "Heavy rainfall expected in northern and eastern Mashhad. High probability of flash flooding in low-lying areas. Avoid river channels and flood-prone zones.",
       "tags": ["Flood"]
     }
   ]

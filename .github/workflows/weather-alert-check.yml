@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       mock:
-        description: "اجرا با mock alert برای تست (true/false)"
+        description: "Run with mock alert fixture for testing (true/false)"
+        required: false
+        default: "false"
+      test_mode:
+        description: "Run in TEST_MODE: load local fixture, bypass OWM API key check (true/false)"
         required: false
         default: "false"
 
@@ -33,6 +37,7 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           AUTHORIZED_USER_ID: ${{ secrets.AUTHORIZED_USER_ID }}
           MOCK_ALERT: ${{ github.event.inputs.mock || 'false' }}
+          TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
         run: python weather_alert_check.py
 
       - name: Commit updated state
