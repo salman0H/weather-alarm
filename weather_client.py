@@ -13,7 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-OWM_BASE_URL = "https://api.openweathermap.org/data/2.5/onecall"
+# We now use the standard Current Weather & 5-Day Forecast APIs for high reliability
 
 MOCK_FIXTURE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "tests", "fixtures", "sample_alert.json"
@@ -22,44 +22,56 @@ MOCK_FIXTURE_PATH = os.path.join(
 
 def fetch_weather_data_for_zone(lat, lon, api_key, timeout=10):
     """
-    Fetches the full OWM One Call v3 payload for a single lat/lon point.
-
-    Args:
-        lat (float): Latitude of the zone center.
-        lon (float): Longitude of the zone center.
-        api_key (str): OpenWeatherMap API key.
-        timeout (int): Socket timeout in seconds.
-
-    Returns:
-        tuple: (dict payload, str status_code)
+    Fetches weather data using the highly reliable Current Weather and Forecast APIs.
+    Maps the response back to the One Call structure so the pipeline doesn't break.
     """
     if os.environ.get("TEST_MODE", "false").lower() == "true":
         return _load_fixture(), "200"
 
-    params = {
-        "lat": lat,
-        "lon": lon,
-        "appid": api_key,
-        "exclude": "minutely",
-        "units": "metric",
-        "lang": "fa",
-    }
-    url = f"{OWM_BASE_URL}?{urllib.parse.urlencode(params)}"
-    request = urllib.request.Request(url, headers={"User-Agent": "weather-alert-bot/1.0"})
-    
+    headers = {"User-Agent": "weather-alert-bot/1.0"}
     fallback = {
-        "current": {"temp": 20.0, "humidity": 30, "wind_speed": 5.0, "uvi": 5.0},
-        "hourly": [{"dt": 0, "temp": 20.0, "pop": 0.0, "wind_speed": 5.0, "uvi": 5.0} for _ in range(24)],
+        "current": {"temp": 20.0, "humidity": 30, "wind_speed": 5.0, "uvi": 0.0},
+        "hourly": [{"dt": 0, "temp": 20.0, "pop": 0.0, "wind_speed": 5.0, "uvi": 0.0} for _ in range(24)],
         "alerts": []
     }
 
+    current_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&units=metric&appid={api_key}&lang=fa"
+    forecast_url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&units=metric&appid={api_key}&lang=fa"
+
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        # Strictly ensure json contains required fields
-        _ = payload["current"]
-        _ = payload["hourly"]
-        return payload, str(response.getcode())
+        # 1. Fetch Current
+        req_c = urllib.request.Request(current_url, headers=headers)
+        with urllib.request.urlopen(req_c, timeout=timeout) as response:
+            data_c = json.loads(response.read().decode("utf-8"))
+            
+        # 2. Fetch Forecast (3-hour intervals)
+        req_f = urllib.request.Request(forecast_url, headers=headers)
+        with urllib.request.urlopen(req_f, timeout=timeout) as response:
+            data_f = json.loads(response.read().decode("utf-8"))
+
+        # Map to pipeline format
+        payload = {
+            "timezone_offset": data_c.get("timezone", 12600),
+            "current": {
+                "temp": data_c["main"]["temp"],
+                "humidity": data_c["main"]["humidity"],
+                "wind_speed": data_c["wind"]["speed"],
+                "uvi": 0.0  # UVI is unavailable on free standard endpoints
+            },
+            "hourly": [],
+            "alerts": [] # Standard APIs do not provide official alerts; relying on predictive engine
+        }
+
+        for item in data_f.get("list", []):
+            payload["hourly"].append({
+                "dt": item["dt"],
+                "temp": item["main"]["temp"],
+                "pop": item.get("pop", 0.0),
+                "wind_speed": item["wind"]["speed"],
+                "uvi": 0.0
+            })
+
+        return payload, "200"
     except urllib.error.HTTPError as e:
         print(f"[OWM] HTTP {e.code} {e.reason} — lat={lat} lon={lon}", file=sys.stderr)
         return fallback, f"OWM HTTP {e.code} {e.reason}"
