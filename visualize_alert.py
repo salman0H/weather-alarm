@@ -15,7 +15,7 @@ TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Urban Weather Intelligence - Mashhad</title>
+<title>سامانه هوشمند پایش و هشدار جوی - مشهد</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Vazirmatn:wght@300;500;700;900&display=swap" rel="stylesheet">
@@ -46,7 +46,7 @@ body {{
         radial-gradient(circle at 85% 30%, rgba(45, 212, 200, 0.04), transparent 25%);
 }}
 h1, h2, h3 {{ font-weight: 700; margin: 0; }}
-.num {{ font-family: 'JetBrains Mono', monospace; }}
+.num {{ font-family: 'JetBrains Mono', 'Vazirmatn', monospace; }}
 .container {{
     max-width: 1400px;
     margin: 0 auto;
@@ -145,24 +145,24 @@ h1, h2, h3 {{ font-weight: 700; margin: 0; }}
 <body>
 <div class="container">
     <div class="header">
-        <div class="brand">Mashhad Weather Intelligence</div>
-        <div class="time num">LAST SYNC: {generated_at} UTC</div>
+        <div class="brand">سامانه هوشمند پایش و هشدار جوی مشهد</div>
+        <div class="time num">آخرین بروزرسانی: {generated_at} UTC</div>
     </div>
     
     <div class="main-content">
         <div class="panel gs-panel">
-            <h2>Live Atmospheric Visualizer</h2>
+            <h2>پایشگر زنده جوی</h2>
             <div class="hero-grid" style="margin-top: 16px;">
-                <div class="metric"><div class="metric-val num" id="val-temp">--°C</div><div class="metric-label">Temperature</div></div>
-                <div class="metric"><div class="metric-val num" id="val-hum">--%</div><div class="metric-label">Humidity</div></div>
-                <div class="metric"><div class="metric-val num" id="val-wind">--</div><div class="metric-label">Wind (km/h)</div></div>
-                <div class="metric"><div class="metric-val num" id="val-aqi">--</div><div class="metric-label">AQI</div></div>
+                <div class="metric"><div class="metric-val num" id="val-temp">--°C</div><div class="metric-label">دما</div></div>
+                <div class="metric"><div class="metric-val num" id="val-hum">--%</div><div class="metric-label">رطوبت</div></div>
+                <div class="metric"><div class="metric-val num" id="val-wind">--</div><div class="metric-label">سرعت باد</div></div>
+                <div class="metric"><div class="metric-val num" id="val-aqi">--</div><div class="metric-label">کیفیت هوا (AQI)</div></div>
             </div>
             
             <div id="map"></div>
             
             <div style="margin-top: 24px;">
-                <h3>24-Hour Trend Analysis</h3>
+                <h3>تحلیل روند ۲۴ ساعته</h3>
                 <div class="timeline" id="timeline">
                     <!-- Bars generated via JS -->
                 </div>
@@ -172,7 +172,7 @@ h1, h2, h3 {{ font-weight: 700; margin: 0; }}
     
     <div class="sidebar">
         <div class="panel gs-panel" style="margin-bottom: 24px;">
-            <h3>Weather Risk Score</h3>
+            <h3>شاخص ریسک</h3>
             <div class="risk-container" style="margin-top: 16px;">
                 <div class="risk-circle">
                     <span class="risk-value num" id="risk-counter">0</span>
@@ -185,12 +185,12 @@ h1, h2, h3 {{ font-weight: 700; margin: 0; }}
         </div>
         
         <div class="panel gs-panel" style="margin-bottom: 24px;">
-            <h3>AI Weather Briefing</h3>
+            <h3>گزارش هوش مصنوعی</h3>
             <p class="briefing" style="margin-top: 16px;">{ai_briefing}</p>
         </div>
         
         <div class="panel gs-panel">
-            <h3 style="margin-bottom: 16px;">Active Alerts Center</h3>
+            <h3 style="margin-bottom: 16px;">هشدارهای فعال</h3>
             {alerts_html}
         </div>
     </div>
@@ -305,17 +305,17 @@ def render_report(zone_configs, current_alerts, global_metrics=None, output_path
             "lon": zc["lon"],
             "color": "#ef4444" if has_alert else "#2dd4c8",
             "has_alert": has_alert,
-            "status": "Active Warning" if has_alert else "All Clear"
+            "status": "هشدار فعال" if has_alert else "وضعیت سیستم: فعال"
         })
 
     # Calculate Risk Score
     if not current_alerts:
         risk_score = 10
-        risk_label = "Low Risk"
+        risk_label = "ریسک پایین"
         risk_color = "var(--safe)"
-        risk_reason = "No active meteorological warnings in the Mashhad region. Conditions are stable."
-        alerts_html = '<div class="no-alerts">No active alerts at this time.</div>'
-        ai_briefing = "Atmospheric conditions remain stable across all sectors. No anomalies detected in the 24-hour forecast window."
+        risk_reason = "هیچ هشدار هواشناسی فعالی در منطقه مشهد وجود ندارد. شرایط پایدار است."
+        alerts_html = '<div class="no-alerts">در حال حاضر هشدار فعالی وجود ندارد.</div>'
+        ai_briefing = "شرایط جوی در تمام مناطق پایدار است. هیچ ناهنجاری در پنجره پیش‌بینی ۲۴ ساعته تشخیص داده نشده است."
     else:
         max_level = 0
         reasons = []
@@ -328,18 +328,18 @@ def render_report(zone_configs, current_alerts, global_metrics=None, output_path
             
         if max_level == 3:
             risk_score = 92
-            risk_label = "CRITICAL RISK"
+            risk_label = "ریسک بحرانی"
             risk_color = "var(--danger)"
         elif max_level == 2:
             risk_score = 75
-            risk_label = "HIGH RISK"
+            risk_label = "ریسک بالا"
             risk_color = "var(--warning)"
         else:
             risk_score = 45
-            risk_label = "ELEVATED RISK"
+            risk_label = "ریسک فزاینده"
             risk_color = "var(--warning)"
             
-        risk_reason = "Multiple anomalies detected: " + ", ".join(set(reasons)) + ". Proceed with caution."
+        risk_reason = "ناهنجاری‌های متعددی تشخیص داده شد: " + "، ".join(set(reasons)) + ". با احتیاط عمل کنید."
         
         cards = []
         for alert in current_alerts.values():
@@ -352,13 +352,13 @@ def render_report(zone_configs, current_alerts, global_metrics=None, output_path
                 <div class="alert-title">{level_info['emoji']} {alert.get('event', '')}</div>
                 <div class="alert-desc">{alert.get('description', '')}</div>
                 <div class="alert-meta num">
-                    ZONES: {zones_str}<br>
-                    START: {alert.get('start', 'N/A')} | END: {alert.get('end', 'N/A')}
+                    مناطق: {zones_str}<br>
+                    شروع: {alert.get('start', 'N/A')} | پایان: {alert.get('end', 'N/A')}
                 </div>
             </div>
             """)
         alerts_html = "\n".join(cards)
-        ai_briefing = "Anomalies detected in the Mashhad region. Probability of severe impact is elevated based on recent sensor data. Please review the Active Alerts Center for sector-specific guidance."
+        ai_briefing = "ناهنجاری‌هایی در منطقه مشهد تشخیص داده شده است. بر اساس داده‌های اخیر حسگرها، احتمال تأثیر شدید بالا است. لطفاً برای راهنمایی‌های خاص هر منطقه به مرکز هشدارهای فعال مراجعه کنید."
 
     # Read existing HTML
     with open(output_path, "r", encoding="utf-8") as f:
@@ -367,7 +367,7 @@ def render_report(zone_configs, current_alerts, global_metrics=None, output_path
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     # Update Time
-    html = re.sub(r'(LAST SYNC: ).*?( UTC)', rf'\g<1>{generated_at}\g<2>', html)
+    html = re.sub(r'(آخرین بروزرسانی: ).*?( UTC)', rf'\g<1>{generated_at}\g<2>', html)
 
     # Update Live Visualizer Metrics (for script GSAP to animate to)
     # GSAP lines in script: gsap.to("#val-temp", { textContent: 28, ...
@@ -395,9 +395,9 @@ def render_report(zone_configs, current_alerts, global_metrics=None, output_path
     html = re.sub(r'(<p class="briefing" style="margin-top: 16px;">)[^<]+(</p>)', rf'\g<1>{ai_briefing}\g<2>', html)
 
     # Update Active Alerts HTML - This is trickier because it's a multiline block.
-    # We will look for <h3 style="margin-bottom: 16px;">Active Alerts Center</h3> and replace everything after it until the closing div.
+    # We will look for <h3 style="margin-bottom: 16px;">هشدارهای فعال</h3> and replace everything after it until the closing div.
     html = re.sub(
-        r'(<h3 style="margin-bottom: 16px;">Active Alerts Center</h3>\s*).*?(?=\s*</div>\s*</div>\s*</div>)', 
+        r'(<h3 style="margin-bottom: 16px;">هشدارهای فعال</h3>\s*).*?(?=\s*</div>\s*</div>\s*</div>)', 
         rf'\g<1>{alerts_html}', 
         html, 
         flags=re.DOTALL

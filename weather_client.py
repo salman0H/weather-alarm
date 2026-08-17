@@ -13,7 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-OWM_BASE_URL = "https://api.openweathermap.org/data/3.0/onecall"
+OWM_BASE_URL = "https://api.openweathermap.org/data/2.5/onecall"
 
 MOCK_FIXTURE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "tests", "fixtures", "sample_alert.json"
@@ -56,16 +56,22 @@ def fetch_weather_data_for_zone(lat, lon, api_key, timeout=10):
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
+        # Strictly ensure json contains required fields
+        _ = payload["current"]
+        _ = payload["hourly"]
         return payload, str(response.getcode())
     except urllib.error.HTTPError as e:
         print(f"[OWM] HTTP {e.code} {e.reason} — lat={lat} lon={lon}", file=sys.stderr)
-        return fallback, f"HTTP {e.code}"
+        return fallback, f"OWM HTTP {e.code} {e.reason}"
+    except KeyError as e:
+        print(f"[OWM] KeyError — {str(e)} — lat={lat} lon={lon}", file=sys.stderr)
+        return fallback, f"OWM KeyError '{e.args[0]}'"
     except urllib.error.URLError as e:
         print(f"[OWM] Network error — {e.reason} — lat={lat} lon={lon}", file=sys.stderr)
-        return fallback, "Network Error"
+        return fallback, f"OWM Network Error: {e.reason}"
     except Exception as e:
         print(f"[OWM] Unexpected error — {e} — lat={lat} lon={lon}", file=sys.stderr)
-        return fallback, "Error"
+        return fallback, f"OWM Error: {str(e)}"
 
 
 def _load_fixture():
@@ -87,7 +93,7 @@ def fetch_waqi_data(token, timeout=10):
     if os.environ.get("TEST_MODE", "false").lower() == "true":
         return {"aqi": 85, "dominant": "pm25"}, "200"
 
-    url = f"https://api.waqi.info/feed/mashhad/?token={token}"
+    url = f"https://api.waqi.info/feed/@11601/?token={token}"
     request = urllib.request.Request(url, headers={"User-Agent": "weather-alert-bot/1.0"})
     
     fallback = {"aqi": -1, "dominant": "unknown"}
@@ -97,17 +103,23 @@ def fetch_waqi_data(token, timeout=10):
             payload = json.loads(response.read().decode("utf-8"))
         
         if payload.get("status") == "ok":
-            data = payload.get("data", {})
+            data = payload["data"]
+            aqi = data["aqi"]
+            iaqi = data.get("iaqi", {})
             return {
-                "aqi": data.get("aqi", -1),
-                "dominant": data.get("dominentpol", "unknown")
+                "aqi": aqi,
+                "dominant": data.get("dominentpol", "unknown"),
+                "pm25": iaqi.get("pm25", {}).get("v", -1),
+                "pm10": iaqi.get("pm10", {}).get("v", -1)
             }, "200"
         else:
-            return fallback, "WAQI Status Error"
+            return fallback, f"WAQI Error: {payload.get('data', 'Unknown Status')}"
     except urllib.error.HTTPError as e:
-        return fallback, f"HTTP {e.code}"
+        return fallback, f"WAQI HTTP {e.code} {e.reason}"
+    except KeyError as e:
+        return fallback, f"WAQI KeyError '{e.args[0]}'"
     except urllib.error.URLError as e:
-        return fallback, "Network Error"
+        return fallback, f"WAQI Network Error: {e.reason}"
     except Exception as e:
-        return fallback, "Error"
+        return fallback, f"WAQI Error: {str(e)}"
 

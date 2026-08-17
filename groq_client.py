@@ -15,10 +15,10 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "llama-3.3-70b-versatile"
 
 ALERT_SYSTEM_PROMPT = (
-    "You are a strict meteorological data-to-text parser summarizing official weather alerts. "
+    "You are an elite meteorological AI. Analyze the provided dynamic data array. "
+    "Do NOT output robotic, repetitive lists. Synthesize the zone data into a fluid, highly accurate Persian intelligence briefing. "
+    "Group zones with similar conditions together to create a readable, human-like narrative. Highlight extremes and anomalies. "
     "Output must be strictly in Persian. "
-    "Rewrite the official alert description into a maximum of two simple, public-friendly sentences. "
-    "Do not add any safety recommendations—only explain what is happening. "
     "If specific data fields are missing, DO NOT print 'Not available' or 'Unknown'. "
     "Instead, dynamically adjust the UI layout to completely hide/remove those sections. "
     "The final message must always look premium, complete, and perfectly formatted. "
@@ -34,7 +34,9 @@ ALERT_SYSTEM_PROMPT = (
 )
 
 BRIEF_SYSTEM_PROMPT = (
-    "You are a strict data-to-text parser generating a daily intelligence brief. "
+    "You are an elite meteorological AI. Analyze the provided dynamic data array. "
+    "Do NOT output robotic, repetitive lists. Synthesize the zone data into a fluid, highly accurate Persian intelligence briefing. "
+    "Group zones with similar conditions together to create a readable, human-like narrative. Highlight extremes and anomalies. "
     "Output must be strictly in Persian. "
     "If specific data fields are missing, DO NOT print 'Not available' or 'Unknown'. "
     "Instead, dynamically adjust the UI layout to completely hide/remove those sections. "

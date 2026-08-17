@@ -446,9 +446,9 @@ def main():
 
     current_state = state_module.load_state()
 
-    devex_footer = None
+    devex_footer = f"OWM={owm_status} | WAQI={waqi_status}"
     if test_mode or mock_alert:
-        devex_footer = f"TEST_MODE={test_mode} | MOCK_ALERT={mock_alert} | OWM={owm_status} | WAQI={waqi_status}"
+        devex_footer = f"TEST_MODE={test_mode} | MOCK_ALERT={mock_alert} | " + devex_footer
 
     # 2. State Machine Routing & Dispatch
     route_and_dispatch(
