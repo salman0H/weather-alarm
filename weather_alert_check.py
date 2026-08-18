@@ -72,9 +72,9 @@ def compute_day_part_analytics(hourly_data, timezone_offset_secs):
     Uses local time (UTC + offset).
     """
     buckets = {
-        "Morning": {"temps": [], "pops": [], "winds": [], "uvis": []},
-        "Afternoon": {"temps": [], "pops": [], "winds": [], "uvis": []},
-        "Evening": {"temps": [], "pops": [], "winds": [], "uvis": []}
+        "Morning": {"temps": [], "pops": [], "winds": [], "humidities": [], "uvis": []},
+        "Afternoon": {"temps": [], "pops": [], "winds": [], "humidities": [], "uvis": []},
+        "Evening": {"temps": [], "pops": [], "winds": [], "humidities": [], "uvis": []}
     }
     
     for hour in hourly_data[:24]:
@@ -93,7 +93,9 @@ def compute_day_part_analytics(hourly_data, timezone_offset_secs):
             buckets[bucket]["temps"].append(hour.get("temp", 0))
             buckets[bucket]["pops"].append(hour.get("pop", 0) * 100)
             buckets[bucket]["winds"].append(hour.get("wind_speed", 0))
-            buckets[bucket]["uvis"].append(hour.get("uvi", 0))
+            buckets[bucket]["humidities"].append(hour.get("humidity", 0))
+            if hour.get("uvi"):
+                buckets[bucket]["uvis"].append(hour.get("uvi"))
             
     analytics = {}
     for name, data in buckets.items():
@@ -101,12 +103,14 @@ def compute_day_part_analytics(hourly_data, timezone_offset_secs):
             analytics[name] = {
                 "avg_temp": round(sum(data["temps"]) / len(data["temps"]), 1),
                 "peak_temp": round(max(data["temps"]), 1),
+                "avg_humidity": round(sum(data["humidities"]) / len(data["humidities"])) if data["humidities"] else 0,
                 "avg_pop": round(sum(data["pops"]) / len(data["pops"]), 1),
                 "peak_pop": round(max(data["pops"]), 1),
                 "avg_wind": round(sum(data["winds"]) / len(data["winds"]), 1),
-                "peak_wind": round(max(data["winds"]), 1),
-                "avg_uvi": round(sum(data["uvis"]) / len(data["uvis"]), 1)
+                "peak_wind": round(max(data["winds"]), 1)
             }
+            if data["uvis"]:
+                analytics[name]["avg_uvi"] = round(sum(data["uvis"]) / len(data["uvis"]), 1)
         else:
             analytics[name] = None
     

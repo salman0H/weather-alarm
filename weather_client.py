@@ -30,8 +30,8 @@ def fetch_weather_data_for_zone(lat, lon, api_key, timeout=10):
 
     headers = {"User-Agent": "weather-alert-bot/1.0"}
     fallback = {
-        "current": {"temp": 20.0, "humidity": 30, "wind_speed": 5.0, "uvi": 0.0},
-        "hourly": [{"dt": 0, "temp": 20.0, "pop": 0.0, "wind_speed": 5.0, "uvi": 0.0} for _ in range(24)],
+        "current": {"temp": 20.0, "humidity": 30, "wind_speed": 5.0},
+        "hourly": [{"dt": 0, "temp": 20.0, "humidity": 30, "pop": 0.0, "wind_speed": 5.0} for _ in range(24)],
         "alerts": []
     }
 
@@ -56,7 +56,6 @@ def fetch_weather_data_for_zone(lat, lon, api_key, timeout=10):
                 "temp": data_c["main"]["temp"],
                 "humidity": data_c["main"]["humidity"],
                 "wind_speed": data_c["wind"]["speed"],
-                "uvi": 0.0  # UVI is unavailable on free standard endpoints
             },
             "hourly": [],
             "alerts": [] # Standard APIs do not provide official alerts; relying on predictive engine
@@ -66,9 +65,9 @@ def fetch_weather_data_for_zone(lat, lon, api_key, timeout=10):
             payload["hourly"].append({
                 "dt": item["dt"],
                 "temp": item["main"]["temp"],
+                "humidity": item["main"]["humidity"],
                 "pop": item.get("pop", 0.0),
                 "wind_speed": item["wind"]["speed"],
-                "uvi": 0.0
             })
 
         return payload, "200"
