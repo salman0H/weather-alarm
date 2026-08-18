@@ -105,7 +105,7 @@ h1, h2, h3 { font-weight: 700; margin: 0; }
     width: 100px; height: 100px; border-radius: 50%;
     display: flex; justify-content: center; align-items: center;
     font-size: 36px; font-weight: 900; color: var(--bg-color);
-    background: conic-gradient(var(--danger) 0%, var(--danger) 10%, #1e293b 10%, #1e293b 100%);
+    background: conic-gradient(var(--danger) 0%, var(--danger) 45%, #1e293b 45%, #1e293b 100%);
     position: relative; box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
 }
 .risk-circle::after {
@@ -134,7 +134,7 @@ h1, h2, h3 { font-weight: 700; margin: 0; }
 <div class="container">
     <div class="header">
         <div class="brand">سامانه هوشمند پایش و هشدار جوی</div>
-        <div class="time num">آخرین بروزرسانی: 2026-08-18 09:51:48 UTC</div>
+        <div class="time num">آخرین بروزرسانی: 2026-08-18 09:55:36 UTC</div>
     </div>
     
     <div class="main-content">
@@ -166,21 +166,30 @@ h1, h2, h3 { font-weight: 700; margin: 0; }
                     <span class="risk-value num" id="risk-counter">0</span>
                 </div>
                 <div class="risk-details">
-                    <div style="font-weight: 700; color: var(--safe); font-size: 18px;">ریسک پایین</div>
-                    <div class="risk-reason">هیچ هشدار هواشناسی فعالی در منطقه مشهد وجود ندارد. شرایط پایدار است.</div>
+                    <div style="font-weight: 700; color: var(--warning); font-size: 18px;">ریسک فزاینده</div>
+                    <div class="risk-reason">ناهنجاری‌های متعددی تشخیص داده شد: Flash Flood Warning. با احتیاط عمل کنید.</div>
                 </div>
             </div>
         </div>
         
         <div class="panel gs-panel" style="margin-bottom: 24px;">
             <h3>گزارش هوش مصنوعی</h3>
-            <p class="briefing" style="margin-top: 16px;">شرایط جوی در تمام مناطق پایدار است. هیچ ناهنجاری در پنجره پیش‌بینی ۲۴ ساعته تشخیص داده نشده است.</p>
+            <p class="briefing" style="margin-top: 16px;">ناهنجاری‌هایی در منطقه مشهد تشخیص داده شده است. بر اساس داده‌های اخیر حسگرها، احتمال تأثیر شدید بالا است. لطفاً برای راهنمایی‌های خاص هر منطقه به مرکز هشدارهای فعال مراجعه کنید.</p>
         </div>
         
         <div class="panel gs-panel">
             <h3 style="margin-bottom: 16px;">هشدارهای فعال</h3>
             
-            <div class="no-alerts">در حال حاضر هشدار فعالی وجود ندارد.</div></div></div></div></div></div>
+            
+            <div class="alert-card" style="border-color: #633806">
+                <div class="alert-title">🟡 Flash Flood Warning</div>
+                <div class="alert-desc">Heavy rainfall expected in northern and eastern Mashhad. High probability of flash flooding in low-lying areas. Avoid river channels and flood-prone zones.</div>
+                <div class="alert-meta num">
+                    مناطق: مرکز شهر، وکیل‌آباد، طرق، قاسم‌آباد، الهیه / طلاب، شهرک صنعتی توس، حرم مطهر، کوهسنگی، هاشمیه، احمدآباد<br>
+                    شروع: 1755248400 | پایان: 1755262800
+                </div>
+            </div>
+            </div></div></div></div></div></div>
                 </div>
             </div>
             
@@ -190,14 +199,14 @@ h1, h2, h3 { font-weight: 700; margin: 0; }
 
 <script>
 // Mock Live Data Animation
-gsap.to("#val-temp", { textContent: 36, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
-gsap.to("#val-hum", { textContent: 19, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
-gsap.to("#val-wind", { textContent: 4, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
-gsap.to("#val-aqi", { textContent: 0, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
+gsap.to("#val-temp", { textContent: 34, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
+gsap.to("#val-hum", { textContent: 28, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
+gsap.to("#val-wind", { textContent: 17, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
+gsap.to("#val-aqi", { textContent: 9, duration: 2, snap: { textContent: 1 }, ease: "power1.out" });
 
 // Risk Counter Animation
 gsap.to("#risk-counter", {
-    textContent: 10,
+    textContent: 45,
     duration: 2.5,
     snap: { textContent: 1 },
     ease: "power2.out"
@@ -233,7 +242,7 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     maxZoom: 20
 }).addTo(map);
 
-var zonePoints = [{"zone": "مرکز شهر", "lat": 36.297, "lon": 59.606, "color": "#2dd4c8", "has_alert": false, "status": "وضعیت سیستم: فعال"}, {"zone": "وکیل‌آباد", "lat": 36.264, "lon": 59.531, "color": "#2dd4c8", "has_alert": false, "status": "وضعیت سیستم: فعال"}, {"zone": "طرق", "lat": 36.343, "lon": 59.647, "color": "#2dd4c8", "has_alert": false, "status": "وضعیت سیستم: فعال"}, {"zone": "قاسم‌آباد", "lat": 36.311, "lon": 59.499, "color": "#2dd4c8", "has_alert": false, "status": "وضعیت سیستم: فعال"}, {"zone": "الهیه / طلاب", "lat": 36.334, "lon": 59.585, "color": "#2dd4c8", "has_alert": false, "status": "وضعیت سیستم: فعال"}, {"zone": "شهرک صنعتی توس", "lat": 36.202, "lon": 59.579, "color": "#2dd4c8", "has_alert": false, "status": "وضعیت سیستم: فعال"}, {"zone": "حرم مطهر", "lat": 36.2878, "lon": 59.6155, "color": "#2dd4c8", "has_alert": false, "status": "وضعیت سیستم: فعال"}, {"zone": "کوهسنگی", "lat": 36.2731, "lon": 59.5786, "color": "#2dd4c8", "has_alert": false, "status": "وضعیت سیستم: فعال"}, {"zone": "هاشمیه", "lat": 36.3134, "lon": 59.5076, "color": "#2dd4c8", "has_alert": false, "status": "وضعیت سیستم: فعال"}, {"zone": "احمدآباد", "lat": 36.2917, "lon": 59.5843, "color": "#2dd4c8", "has_alert": false, "status": "وضعیت سیستم: فعال"}];
+var zonePoints = [{"zone": "مرکز شهر", "lat": 36.297, "lon": 59.606, "color": "#ef4444", "has_alert": true, "status": "هشدار فعال"}, {"zone": "وکیل‌آباد", "lat": 36.264, "lon": 59.531, "color": "#ef4444", "has_alert": true, "status": "هشدار فعال"}, {"zone": "طرق", "lat": 36.343, "lon": 59.647, "color": "#ef4444", "has_alert": true, "status": "هشدار فعال"}, {"zone": "قاسم‌آباد", "lat": 36.311, "lon": 59.499, "color": "#ef4444", "has_alert": true, "status": "هشدار فعال"}, {"zone": "الهیه / طلاب", "lat": 36.334, "lon": 59.585, "color": "#ef4444", "has_alert": true, "status": "هشدار فعال"}, {"zone": "شهرک صنعتی توس", "lat": 36.202, "lon": 59.579, "color": "#ef4444", "has_alert": true, "status": "هشدار فعال"}, {"zone": "حرم مطهر", "lat": 36.2878, "lon": 59.6155, "color": "#ef4444", "has_alert": true, "status": "هشدار فعال"}, {"zone": "کوهسنگی", "lat": 36.2731, "lon": 59.5786, "color": "#ef4444", "has_alert": true, "status": "هشدار فعال"}, {"zone": "هاشمیه", "lat": 36.3134, "lon": 59.5076, "color": "#ef4444", "has_alert": true, "status": "هشدار فعال"}, {"zone": "احمدآباد", "lat": 36.2917, "lon": 59.5843, "color": "#ef4444", "has_alert": true, "status": "هشدار فعال"}];
 zonePoints.forEach(function(z) {
     var color = z.color;
     var radius = z.has_alert ? 12 : 6;
