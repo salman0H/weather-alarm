@@ -66,11 +66,12 @@ def clean_typography(text):
     text = re.sub(r'<think>.*', '', text, flags=re.DOTALL)
     text = text.strip()
 
-    # Repair broken HTML: close any unclosed <b> tags
-    open_b_count = text.count('<b>')
-    close_b_count = text.count('</b>')
-    if open_b_count > close_b_count:
-        text = text.rstrip() + '</b>' * (open_b_count - close_b_count)
+    # Repair broken HTML: close any unclosed common formatting tags
+    for tag in ['b', 'i', 'code', 'u', 's']:
+        open_count = text.count(f'<{tag}>')
+        close_count = text.count(f'</{tag}>')
+        if open_count > close_count:
+            text = text.rstrip() + f'</{tag}>' * (open_count - close_count)
     
     return text
 

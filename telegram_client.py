@@ -7,6 +7,7 @@ Responsibilities:
 """
 
 import json
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,9 +25,14 @@ def _call(token, method, params, timeout=10):
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        # Telegram error response has JSON body (e.g. chat not found) ->
-        # return it to allow caller to log it instead of crashing.
-        return json.loads(e.read().decode("utf-8"))
+        error_body = e.read().decode("utf-8")
+        print(f"[Telegram HTTP Error] Code {e.code}: {error_body}", file=sys.stderr)
+        result = json.loads(error_body)
+        if not result.get("ok"):
+            sys.exit(f"[FATAL] Telegram API rejected the request: {error_body}")
+        return result
+    except Exception as e:
+        sys.exit(f"[FATAL] Unexpected error in Telegram API call: {e}")
 
 
 def send_message(token, chat_id, text, parse_mode="HTML", reply_markup=None):
