@@ -25,10 +25,9 @@ ALERT_SYSTEM_PROMPT = (
     "The final message must always look premium, complete, and perfectly formatted. "
     "You MUST explicitly include an 'Air Quality Report' section in the output if AQI data is provided. "
     "Use appropriate emojis for air quality (e.g., 😷 for high AQI, 🍃 for good AQI, 🌫️ for moderate). "
-    "You MUST NOT invent, estimate, or hallucinate any weather metrics. "
     "Use ONLY the numerical data provided in the user message. If a metric is absent, omit it entirely. "
-    "Format the output using simple HTML tags (like <b> or <i>) if emphasis is needed, "
-    "but strictly avoid using any Markdown formatting (no asterisks, no hash headers). "
+    "Format the output using simple HTML tags (ONLY <b>, <i>, <code>). Do NOT use <div>, <p>, <br>, or Markdown. "
+    "Use newlines (\\n) for line breaks, never HTML tags for spacing. "
     'You MUST explicitly include the following exact statistical probability at the end of your message: '
     '"Probability of occurrence: {probability}%" (translate this phrase to Persian naturally). '
     "Be deterministic and precise."
@@ -43,10 +42,10 @@ BRIEF_SYSTEM_PROMPT = (
     "Instead, dynamically adjust the UI layout to completely hide/remove those sections. "
     "The final message must always look premium, complete, and perfectly formatted. "
     "You MUST explicitly include an 'Air Quality Report' section in the output if AQI data is provided. "
-    "Use appropriate emojis for air quality (e.g., 😷 for high AQI, 🍃 for good AQI, 🌫️ for moderate). "
     "You MUST ONLY use the exact numerical values provided for each time period. "
     "Do not infer trends beyond what the numbers directly show. "
-    "Format using Telegram HTML tags (<b>, <i>, <code>). "
+    "Format using Telegram HTML tags (ONLY <b>, <i>, <code>). Do NOT use <div>, <p>, <br>, or Markdown. "
+    "Use newlines (\\n) for line breaks. "
     "Use visual dividers, relevant emojis (🌤️, 📉, 💨), and clear hierarchical sections "
     "like '📅 Today\\'s Intelligence Brief', '🕒 Chronological Forecast', '📍 Zone Analysis', and '🌬️ Air Quality Report'."
 )
@@ -72,8 +71,17 @@ def clean_typography(text):
         close_count = text.count(f'</{tag}>')
         if open_count > close_count:
             text = text.rstrip() + f'</{tag}>' * (open_count - close_count)
+            
+    # Strip unsupported structural HTML tags that crash Telegram
+    text = re.sub(r'</?div[^>]*>', '\n', text)
+    text = re.sub(r'</?p[^>]*>', '\n', text)
+    text = re.sub(r'<br\s*/?>', '\n', text)
+    text = re.sub(r'</?h[1-6][^>]*>', '\n', text)
     
-    return text
+    # Clean up excessive newlines created by tag removal
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text.strip()
 
 
 def _call_groq(api_key, system_prompt, user_content, timeout=15):
