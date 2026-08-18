@@ -7,12 +7,13 @@ Responsibility:
 """
 
 import json
+import re
 import sys
 import urllib.error
 import urllib.request
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "llama-3.3-70b-versatile"
+MODEL = "openai/gpt-oss-120b"
 
 ALERT_SYSTEM_PROMPT = (
     "You are an elite meteorological AI. Analyze the provided dynamic data array. "
@@ -56,6 +57,24 @@ FALLBACK_SUMMARY = (
 )
 
 
+def clean_typography(text):
+    if not text:
+        return text
+
+    # Strip both closed <think>...</think> and unclosed <think>... blocks
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<think>.*', '', text, flags=re.DOTALL)
+    text = text.strip()
+
+    # Repair broken HTML: close any unclosed <b> tags
+    open_b_count = text.count('<b>')
+    close_b_count = text.count('</b>')
+    if open_b_count > close_b_count:
+        text = text.rstrip() + '</b>' * (open_b_count - close_b_count)
+    
+    return text
+
+
 def _call_groq(api_key, system_prompt, user_content, timeout=15):
     if not api_key or api_key in ("TEST_MODE_PLACEHOLDER", "x"):
         return f"[TEST MODE] AI summary skipped — no real Groq key provided. User content: {user_content}"
@@ -63,6 +82,7 @@ def _call_groq(api_key, system_prompt, user_content, timeout=15):
     body = {
         "model": MODEL,
         "temperature": 0.0,
+        "max_tokens": 1024,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
@@ -83,7 +103,15 @@ def _call_groq(api_key, system_prompt, user_content, timeout=15):
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        return payload["choices"][0]["message"]["content"].strip()
+            choice = payload.get("choices", [])[0]
+            finish_reason = choice.get("finish_reason", "unknown")
+            content = choice.get("message", {}).get("content", "")
+            
+            print(f"[Groq API] finish_reason={finish_reason}, content_length={len(content)}", file=sys.stderr)
+            if finish_reason == "length":
+                print("[Groq Warning] Response was truncated! Increase max_tokens.", file=sys.stderr)
+                
+            return clean_typography(content)
     except urllib.error.HTTPError as e:
         try:
             error_body = e.read().decode("utf-8")

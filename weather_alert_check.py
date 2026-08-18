@@ -419,6 +419,9 @@ def main():
     # 1. Data Collection & Extraction
     current_alerts, global_metrics, hourly_data, tz_offset, dynamic_zone_profiles, waqi_status, owm_status, is_degraded = collect_alerts_across_zones(owm_api_key, waqi_token)
     
+    if is_degraded:
+        log(f"[Pipeline] WARNING — System gracefully handling unforeseen API error. Prepared for degradation: OWM={owm_status} | WAQI={waqi_status}")
+
     # Check if mock alert is forced
     if mock_alert:
         with open(MOCK_FIXTURE_PATH, "r", encoding="utf-8") as f:
