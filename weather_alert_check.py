@@ -207,7 +207,7 @@ def collect_alerts_across_zones(owm_api_key, waqi_token):
         global_metrics["current_hum_avg"] = total_hum / global_metrics["zones_count"]
 
     owm_status_str = ",".join(owm_statuses)
-    is_degraded = (waqi_status != "200") or any(s != "200" for s in owm_statuses)
+    is_degraded = any(s != "200" for s in owm_statuses)
 
     return merged, global_metrics, all_hourly_data, tz_offset, dynamic_zone_profiles, waqi_status, owm_status_str, is_degraded
 
