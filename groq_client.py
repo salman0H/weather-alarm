@@ -91,7 +91,7 @@ def _call_groq(api_key, system_prompt, user_content, timeout=15):
     body = {
         "model": MODEL,
         "temperature": 0.0,
-        "max_tokens": 1024,
+        "max_tokens": 2048,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
